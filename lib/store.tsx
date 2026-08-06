@@ -10,6 +10,13 @@ type CreateClassroomInput = {
   problems: string[];
 };
 
+type AddStudentInput = {
+  name: string;
+  studentId: string;
+  seatNo: number;
+  gender: "M" | "F";
+};
+
 type AppDataContextValue = {
   classrooms: Classroom[];
   tasks: typeof initialTasks;
@@ -18,6 +25,7 @@ type AppDataContextValue = {
   getClassroom: (id: string) => Classroom | undefined;
   getStudent: (classroomId: string, studentId: string) => Student | undefined;
   createClassroom: (input: CreateClassroomInput) => string;
+  addStudent: (classroomId: string, input: AddStudentInput) => void;
   toggleHasFile: (classroomId: string, studentId: string) => void;
   toggleHasAnswer: (classroomId: string, studentId: string) => void;
   sendToAI: (classroomId: string, studentId: string) => void;
@@ -104,6 +112,21 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  const addStudent = useCallback((classroomId: string, input: AddStudentInput) => {
+    const newStudent: Student = {
+      id: "s" + Date.now(),
+      name: input.name,
+      studentId: input.studentId,
+      seatNo: input.seatNo,
+      gender: input.gender,
+      problems: [],
+      homework: { status: "none", hasFile: false, hasAnswer: false, confirmed: false },
+    };
+    setClassrooms((prev) =>
+      prev.map((c) => (c.id !== classroomId ? c : { ...c, students: [...c.students, newStudent] }))
+    );
+  }, []);
+
   const toggleHasFile = useCallback(
     (classroomId: string, studentId: string) => {
       updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, hasFile: !hw.hasFile }));
@@ -180,6 +203,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getClassroom,
       getStudent,
       createClassroom,
+      addStudent,
       toggleHasFile,
       toggleHasAnswer,
       sendToAI,
@@ -198,6 +222,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getClassroom,
       getStudent,
       createClassroom,
+      addStudent,
       toggleHasFile,
       toggleHasAnswer,
       sendToAI,
