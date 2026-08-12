@@ -1,4 +1,4 @@
-export type ReadImageResult = { base64: string; mediaType: string; dataUrl: string; name: string };
+export type ReadImageResult = { file: File; base64: string; mediaType: string; dataUrl: string; name: string };
 
 export const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 
@@ -12,7 +12,7 @@ export function readImageFile(file: File): Promise<ReadImageResult> {
         reject(new Error("อ่านไฟล์ไม่สำเร็จ"));
         return;
       }
-      resolve({ mediaType: match[1], base64: match[2], dataUrl, name: file.name });
+      resolve({ file, mediaType: match[1], base64: match[2], dataUrl, name: file.name });
     };
     reader.onerror = () => reject(new Error("อ่านไฟล์ไม่สำเร็จ"));
     reader.readAsDataURL(file);

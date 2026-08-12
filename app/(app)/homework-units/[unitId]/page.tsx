@@ -55,21 +55,21 @@ export default function HomeworkUnitDetailPage() {
             title="Exercises"
             description="แบบฝึกหัดในชุดนี้"
             files={unit.exercises}
-            onAdd={(name, kind) => addFileToUnit(unit.id, "exercises", name, kind)}
+            onAdd={(file, kind) => addFileToUnit(unit.id, "exercises", file, kind)}
             emptyLabel="ยังไม่มีแบบฝึกหัด"
           />
           <FileList
             title="Answer Keys"
             description="เฉลยของชุดนี้"
             files={unit.answerKeys}
-            onAdd={(name, kind) => addFileToUnit(unit.id, "answerKeys", name, kind)}
+            onAdd={(file, kind) => addFileToUnit(unit.id, "answerKeys", file, kind)}
             emptyLabel="ยังไม่มีเฉลย"
           />
           <FileList
             title="Teaching Materials"
             description="สื่อ/เอกสารประกอบการสอน"
             files={unit.teachingMaterials}
-            onAdd={(name, kind) => addFileToUnit(unit.id, "teachingMaterials", name, kind)}
+            onAdd={(file, kind) => addFileToUnit(unit.id, "teachingMaterials", file, kind)}
             emptyLabel="ยังไม่มีสื่อการสอน"
           />
         </div>

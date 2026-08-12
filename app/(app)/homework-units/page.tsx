@@ -52,8 +52,8 @@ export default function HomeworkUnitsPage() {
       {showCreate && (
         <CreateHomeworkUnitModal
           onClose={() => setShowCreate(false)}
-          onCreate={(input) => {
-            const id = createHomeworkUnit(input);
+          onCreate={async (input) => {
+            const id = await createHomeworkUnit(input);
             setShowCreate(false);
             router.push(`/homework-units/${id}`);
           }}

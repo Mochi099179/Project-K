@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useAppData } from "@/lib/store";
 
 const mainNavIcons = {
   home: (
@@ -81,6 +82,7 @@ function NavButton({
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { teacherName, signOut } = useAppData();
   const isDashboard = pathname === "/dashboard";
   const isQuickCheck = pathname?.startsWith("/quick-check") || pathname?.startsWith("/checks");
   const isClassroom = pathname?.startsWith("/classrooms");
@@ -114,17 +116,22 @@ export function Sidebar() {
         <InertNavItem icon={mainNavIcons.settings} label="การตั้งค่า" />
         <div className="flex items-center gap-2.5 border-t border-border px-3 pt-4">
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gold text-[13px] font-bold text-card">
-            จร
+            {(teacherName || "ครู").slice(0, 2)}
           </div>
-          <div>
-            <div className="text-[13px] font-semibold text-ink">ครูจิราภรณ์</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-semibold text-ink">{teacherName || "ครูผู้สอน"}</div>
             <div className="text-[11px] text-ink/50">ครูผู้สอน</div>
           </div>
         </div>
-        <a href="#" className="flex items-center gap-2 px-3 text-[12.5px] text-ink/50">
-          <span className="h-[15px] w-[15px]">{mainNavIcons.help}</span>
-          ช่วยเหลือ
-        </a>
+        <div className="flex items-center justify-between px-3">
+          <a href="#" className="flex items-center gap-2 text-[12.5px] text-ink/50">
+            <span className="h-[15px] w-[15px]">{mainNavIcons.help}</span>
+            ช่วยเหลือ
+          </a>
+          <button onClick={() => signOut()} className="text-[12.5px] font-semibold text-terracotta">
+            ออกจากระบบ
+          </button>
+        </div>
       </div>
     </aside>
   );

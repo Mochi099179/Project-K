@@ -46,15 +46,23 @@ export function CheckResultView({ check }: { check: Check }) {
     setTimeout(() => setToast(null), 2500);
   }
 
-  function handleSave() {
-    markReviewed(check.id);
-    showToast("บันทึกผลแล้ว");
+  async function handleSave() {
+    try {
+      await markReviewed(check.id);
+      showToast("บันทึกผลแล้ว");
+    } catch {
+      showToast("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    }
   }
 
-  function handleSendClick() {
+  async function handleSendClick() {
     if (check.classroomId && check.studentId) {
-      saveCheckToProfile(check.id, check.classroomId, check.studentId);
-      showToast("บันทึกลง Student Profile แล้ว");
+      try {
+        await saveCheckToProfile(check.id, check.classroomId, check.studentId);
+        showToast("บันทึกลง Student Profile แล้ว");
+      } catch {
+        showToast("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+      }
     } else {
       setShowSendModal(true);
     }
@@ -143,7 +151,9 @@ export function CheckResultView({ check }: { check: Check }) {
                   key={q.id}
                   index={i}
                   question={q}
-                  onCorrect={(correction) => correctQuestion(check.id, q.id, correction)}
+                  onCorrect={(correction) => {
+                    correctQuestion(check.id, q.id, correction).catch(() => showToast("แก้ไขไม่สำเร็จ กรุณาลองใหม่"));
+                  }}
                 />
               ))}
             </div>

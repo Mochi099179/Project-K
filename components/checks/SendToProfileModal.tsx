@@ -28,30 +28,40 @@ export function SendToProfileModal({
 
   const selectedClassroom = classrooms.find((c) => c.id === selectedClassroomId) || null;
 
+  const [savingError, setSavingError] = useState<string | null>(null);
+
   function handleClassroomCreated(classroomId: string) {
     setSelectedClassroomId(classroomId);
     setStep("select-student");
   }
 
-  function handleAddStudentInline() {
+  async function handleAddStudentInline() {
     if (!selectedClassroomId || !newStudentId.trim()) return;
     const classroom = classrooms.find((c) => c.id === selectedClassroomId);
-    const id = addStudent(selectedClassroomId, {
-      name: newStudentName.trim() || `นักเรียน ${newStudentId.trim()}`,
-      studentId: newStudentId.trim(),
-      seatNo: (classroom?.students.length ?? 0) + 1,
-      gender: "M",
-    });
-    setSelectedStudentId(id);
-    setNewStudentId("");
-    setNewStudentName("");
-    setStep("confirm");
+    try {
+      const id = await addStudent(selectedClassroomId, {
+        name: newStudentName.trim() || `นักเรียน ${newStudentId.trim()}`,
+        studentId: newStudentId.trim(),
+        seatNo: (classroom?.students.length ?? 0) + 1,
+        gender: "M",
+      });
+      setSelectedStudentId(id);
+      setNewStudentId("");
+      setNewStudentName("");
+      setStep("confirm");
+    } catch {
+      setSavingError("เพิ่มนักเรียนไม่สำเร็จ กรุณาลองใหม่");
+    }
   }
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!selectedClassroomId || !selectedStudentId) return;
-    saveCheckToProfile(checkId, selectedClassroomId, selectedStudentId);
-    onSaved(selectedClassroomId, selectedStudentId);
+    try {
+      await saveCheckToProfile(checkId, selectedClassroomId, selectedStudentId);
+      onSaved(selectedClassroomId, selectedStudentId);
+    } catch {
+      setSavingError("บันทึกไม่สำเร็จ กรุณาลองใหม่");
+    }
   }
 
   return (
@@ -217,6 +227,11 @@ export function SendToProfileModal({
                 {selectedClassroom.name} {selectedClassroom.subject}
               </div>
             </div>
+            {savingError && (
+              <div className="mb-4 rounded-xl border border-[#BB6B53]/30 bg-[#BB6B53]/10 px-4 py-3 text-[12.5px] text-[#BB6B53]">
+                {savingError}
+              </div>
+            )}
             <div className="flex justify-end gap-2.5">
               <button onClick={() => setStep("select-student")} className="rounded-full border border-border px-5 py-2.5 text-[13px] text-ink/70">
                 ย้อนกลับ

@@ -38,15 +38,26 @@ export function GuidedClassroomSteps({
     setStudentName("");
   }
 
-  function handleConfirm() {
-    const id = createClassroom({
-      name,
-      grade,
-      problems,
-      students: students.map((s) => ({ studentId: s.studentId, name: s.name || undefined, gender: s.gender })),
-    });
-    setCreatedId(id);
-    setStep(5);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const id = await createClassroom({
+        name,
+        grade,
+        problems,
+        students: students.map((s) => ({ studentId: s.studentId, name: s.name || undefined, gender: s.gender })),
+      });
+      setCreatedId(id);
+      setStep(5);
+    } catch {
+      setCreateError("สร้างห้องเรียนไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setCreating(false);
+    }
   }
 
   return (
@@ -201,12 +212,21 @@ export function GuidedClassroomSteps({
             <SummaryRow label="ปัญหาที่ระบุ" value={problems.length ? problems.join(", ") : "ไม่ได้ระบุ"} />
             <SummaryRow label="นักเรียน" value={students.length ? `${students.length} คน` : "ยังไม่มี (เพิ่มทีหลังได้)"} />
           </div>
+          {createError && (
+            <div className="mb-4 rounded-xl border border-[#BB6B53]/30 bg-[#BB6B53]/10 px-4 py-3 text-[12.5px] text-[#BB6B53]">
+              {createError}
+            </div>
+          )}
           <div className="flex justify-end gap-2.5">
             <button onClick={() => setStep(3)} className="rounded-full border border-border px-5 py-2.5 text-[13px] text-ink/70">
               ย้อนกลับ
             </button>
-            <button onClick={handleConfirm} className="rounded-full bg-primary px-6 py-2.5 text-[13px] font-bold text-card">
-              สร้างห้องเรียน
+            <button
+              onClick={handleConfirm}
+              disabled={creating}
+              className="rounded-full bg-primary px-6 py-2.5 text-[13px] font-bold text-card disabled:opacity-50"
+            >
+              {creating ? "กำลังสร้าง..." : "สร้างห้องเรียน"}
             </button>
           </div>
         </>

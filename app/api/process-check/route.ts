@@ -1,14 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
+import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { aiCheckResultSchema } from "@/lib/validation/ai-result";
+import { asFileRef, asFileRefList } from "@/lib/data/mappers";
+import { insertQuestionsAndEvaluations, updateSubmissionStatus, type InsertableQuestion } from "@/lib/data/submissions";
 
-const ALLOWED_MEDIA_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const;
-type AllowedMediaType = (typeof ALLOWED_MEDIA_TYPES)[number];
+type AllowedMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
-function isAllowedMediaType(value: string): value is AllowedMediaType {
-  return (ALLOWED_MEDIA_TYPES as readonly string[]).includes(value);
+function mediaTypeFromName(name: string): AllowedMediaType {
+  const ext = name.split(".").pop()?.toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  return "image/jpeg";
 }
-
-type ImageInput = { base64: string; mediaType: string };
 
 const questionSchema = {
   type: "object",
@@ -32,71 +37,81 @@ const questionSchema = {
     evaluation_confidence: { type: "number", description: "0-1 ความมั่นใจของ AI ในผลการตรวจและวิเคราะห์ข้อนี้" },
   },
   required: [
-    "question",
-    "student_answer",
-    "expected_answer",
-    "keywords",
-    "features",
-    "context",
-    "extraction_confidence",
-    "is_correct",
-    "score",
-    "error_type",
-    "concept_issue",
-    "reasoning",
-    "areas_to_improve",
-    "evaluation_confidence",
+    "question", "student_answer", "expected_answer", "keywords", "features", "context",
+    "extraction_confidence", "is_correct", "score", "error_type", "concept_issue",
+    "reasoning", "areas_to_improve", "evaluation_confidence",
   ],
   additionalProperties: false,
 } as const;
 
-function imageBlock(img: ImageInput) {
-  return {
-    type: "image" as const,
-    source: { type: "base64" as const, media_type: img.mediaType as AllowedMediaType, data: img.base64 },
-  };
+function imageBlock(base64: string, mediaType: AllowedMediaType) {
+  return { type: "image" as const, source: { type: "base64" as const, media_type: mediaType, data: base64 } };
+}
+
+async function downloadAsBase64(
+  supabase: Awaited<ReturnType<typeof getSupabaseServerClient>>,
+  bucket: string,
+  path: string
+): Promise<{ base64: string; mediaType: AllowedMediaType } | null> {
+  const { data, error } = await supabase.storage.from(bucket).download(path);
+  if (error || !data) return null;
+  const arrayBuffer = await data.arrayBuffer();
+  return { base64: Buffer.from(arrayBuffer).toString("base64"), mediaType: mediaTypeFromName(path) };
 }
 
 export async function POST(req: Request) {
-  const body = await req.json();
+  const supabase = await getSupabaseServerClient();
   const {
-    studentLabel,
-    topic,
-    teachingMaterialsText,
-    answerKeyText,
-    answerKeyImage,
-    exerciseImages,
-  }: {
-    studentLabel?: string;
-    topic?: string;
-    teachingMaterialsText?: string;
-    answerKeyText?: string;
-    answerKeyImage?: ImageInput | null;
-    exerciseImages: ImageInput[];
-  } = body;
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!Array.isArray(exerciseImages) || exerciseImages.length === 0) {
-    return NextResponse.json({ error: "กรุณาแนบรูปแบบฝึกหัดของนักเรียนอย่างน้อย 1 หน้า" }, { status: 400 });
-  }
-  for (const img of exerciseImages) {
-    if (!img?.base64 || !isAllowedMediaType(img.mediaType)) {
-      return NextResponse.json({ error: "รูปแบบฝึกหัดมีไฟล์ที่ไม่รองรับ" }, { status: 400 });
-    }
-  }
-  if (answerKeyImage && !isAllowedMediaType(answerKeyImage.mediaType)) {
-    return NextResponse.json({ error: "รูปเฉลยไม่รองรับ" }, { status: 400 });
-  }
-  if (!answerKeyText?.trim() && !answerKeyImage) {
-    return NextResponse.json({ error: "กรุณาแนบเฉลย (พิมพ์ข้อความ หรือแนบรูป)" }, { status: 400 });
+  if (!user) {
+    return NextResponse.json({ error: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
 
-  const client = new Anthropic();
+  const { submissionId } = (await req.json()) as { submissionId?: string };
+  if (!submissionId) {
+    return NextResponse.json({ error: "missing submissionId" }, { status: 400 });
+  }
+
+  // RLS already scopes this to the caller's own rows; the owner_id check is defense in depth.
+  const { data: submission, error: fetchError } = await supabase
+    .from("submissions")
+    .select("*")
+    .eq("id", submissionId)
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  if (fetchError || !submission) {
+    return NextResponse.json({ error: "ไม่พบคำขอตรวจนี้" }, { status: 404 });
+  }
+
+  const exerciseFileRefs = asFileRefList(submission.exercise_files);
+  const answerKeyFileRef = asFileRef(submission.answer_key_file);
+
+  const exerciseImages = (
+    await Promise.all(exerciseFileRefs.map((f) => downloadAsBase64(supabase, "submissions", f.storage_path)))
+  ).filter((img): img is { base64: string; mediaType: AllowedMediaType } => img !== null);
+
+  if (exerciseImages.length === 0) {
+    await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: "ไม่พบไฟล์แบบฝึกหัดของนักเรียน" });
+    return NextResponse.json({ error: "ไม่พบไฟล์แบบฝึกหัดของนักเรียน" }, { status: 400 });
+  }
+
+  const answerKeyImage = answerKeyFileRef ? await downloadAsBase64(supabase, "submissions", answerKeyFileRef.storage_path) : null;
+
+  if (!submission.answer_key_text?.trim() && !answerKeyImage) {
+    await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: "ไม่มีเฉลยแนบมา" });
+    return NextResponse.json({ error: "กรุณาแนบเฉลย" }, { status: 400 });
+  }
+
+  await updateSubmissionStatus(supabase, submissionId, { status: "evaluating" });
 
   const contextLines = [
-    `Student ID: ${studentLabel || "(ไม่ระบุ)"}`,
-    topic ? `หัวข้อ/บทเรียน: ${topic}` : null,
-    teachingMaterialsText?.trim() ? `สื่อ/บันทึกการสอนที่เกี่ยวข้อง:\n${teachingMaterialsText.trim()}` : null,
-    answerKeyText?.trim() ? `เฉลย/เกณฑ์การให้คะแนน (ข้อความ):\n${answerKeyText.trim()}` : null,
+    `Student ID: ${submission.student_code}`,
+    submission.topic ? `หัวข้อ/บทเรียน: ${submission.topic}` : null,
+    submission.teaching_materials_text?.trim() ? `สื่อ/บันทึกการสอนที่เกี่ยวข้อง:\n${submission.teaching_materials_text.trim()}` : null,
+    submission.answer_key_text?.trim() ? `เฉลย/เกณฑ์การให้คะแนน (ข้อความ):\n${submission.answer_key_text.trim()}` : null,
   ].filter(Boolean);
 
   const instructions = [
@@ -114,7 +129,9 @@ export async function POST(req: Request) {
     .filter(Boolean)
     .join("\n");
 
+  let rawResult: unknown;
   try {
+    const client = new Anthropic();
     const response = await client.messages.create({
       model: "claude-sonnet-5",
       max_tokens: 4000,
@@ -124,9 +141,7 @@ export async function POST(req: Request) {
           type: "json_schema",
           schema: {
             type: "object",
-            properties: {
-              questions: { type: "array", items: questionSchema },
-            },
+            properties: { questions: { type: "array", items: questionSchema } },
             required: ["questions"],
             additionalProperties: false,
           },
@@ -136,8 +151,8 @@ export async function POST(req: Request) {
         {
           role: "user",
           content: [
-            ...exerciseImages.map(imageBlock),
-            ...(answerKeyImage ? [imageBlock(answerKeyImage)] : []),
+            ...exerciseImages.map((img) => imageBlock(img.base64, img.mediaType)),
+            ...(answerKeyImage ? [imageBlock(answerKeyImage.base64, answerKeyImage.mediaType)] : []),
             { type: "text", text: [contextLines.join("\n\n"), "", instructions].join("\n") },
           ],
         },
@@ -145,14 +160,51 @@ export async function POST(req: Request) {
     });
 
     const textBlock = response.content.find((block) => block.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return NextResponse.json({ error: "โมเดลไม่ได้ตอบกลับเป็นข้อความ" }, { status: 502 });
-    }
-
-    const result = JSON.parse(textBlock.text);
-    return NextResponse.json(result);
+    if (!textBlock || textBlock.type !== "text") throw new Error("โมเดลไม่ได้ตอบกลับเป็นข้อความ");
+    rawResult = JSON.parse(textBlock.text);
   } catch (err) {
     const message = err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการเรียก AI";
+    await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
+
+  // AI-generated JSON is never trusted directly — validate before it touches the database.
+  const parsed = aiCheckResultSchema.safeParse(rawResult);
+  if (!parsed.success) {
+    const message = "ผลลัพธ์จาก AI ไม่ตรงตามรูปแบบที่กำหนด";
+    await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: message });
+    return NextResponse.json({ error: message, details: parsed.error.flatten() }, { status: 502 });
+  }
+
+  const insertable: InsertableQuestion[] = parsed.data.questions.map((q, idx) => ({
+    question_number: idx + 1,
+    question_text: q.question,
+    student_answer: q.student_answer,
+    expected_answer: q.expected_answer,
+    keywords: q.keywords,
+    features: q.features,
+    context: q.context,
+    extraction_confidence: q.extraction_confidence,
+    is_correct: q.is_correct,
+    score: q.score,
+    error_type: q.error_type,
+    concept_issue: q.concept_issue,
+    reasoning: q.reasoning,
+    areas_to_improve: q.areas_to_improve,
+    evaluation_confidence: q.evaluation_confidence,
+  }));
+
+  try {
+    await insertQuestionsAndEvaluations(supabase, submissionId, insertable);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "บันทึกผลตรวจไม่สำเร็จ";
+    await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
+  const correctCount = insertable.filter((q) => q.is_correct).length;
+  const overallScore = insertable.length ? Math.round((correctCount / insertable.length) * 100) : 0;
+  await updateSubmissionStatus(supabase, submissionId, { status: "review_required", overallScore });
+
+  return NextResponse.json({ ok: true, submissionId, overallScore });
 }

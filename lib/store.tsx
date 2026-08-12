@@ -1,52 +1,36 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type {
   Check,
-  CheckQuestion,
   Classroom,
+  FileKind,
   HomeworkUnit,
   PlanRow,
   QuestionResult,
+  SavedPlan,
   Student,
   TechniqueResult,
-  FileKind,
 } from "./types";
 import { computeOverallScore } from "./types";
-import { initialClassrooms, initialNotifications, initialTasks } from "./mock-data";
-import { buildSeedChecks } from "./mock-checks";
-import { buildSeedHomeworkUnits } from "./mock-homework-units";
+import { getSupabaseBrowserClient } from "./supabase/client";
+import * as classroomsApi from "./data/classrooms";
+import * as homeworkUnitsApi from "./data/homework-units";
+import * as submissionsApi from "./data/submissions";
+import type { HomeworkFileGroup } from "./data/homework-units";
+import type { ReadImageResult } from "./files";
 
-type NewStudentInput = {
-  name?: string;
-  studentId: string;
-  seatNo?: number;
-  gender?: "M" | "F";
-};
-
-type CreateClassroomInput = {
-  name: string;
-  grade: string;
-  problems: string[];
-  students?: NewStudentInput[];
-};
-
-type AddStudentInput = {
-  name: string;
-  studentId: string;
-  seatNo: number;
-  gender: "M" | "F";
-};
-
-type ImageInput = { base64: string; mediaType: string; dataUrl: string };
+type NewStudentInput = { name?: string; studentId: string; seatNo?: number; gender?: "M" | "F" };
+type CreateClassroomInput = { name: string; grade: string; problems: string[]; students?: NewStudentInput[] };
+type AddStudentInput = { name: string; studentId: string; seatNo: number; gender: "M" | "F" };
 
 type StartCheckInput = {
   studentLabel: string;
   topic?: string;
   teachingMaterialsText?: string;
   answerKeyText?: string;
-  answerKeyImage?: ImageInput | null;
-  exerciseImages: ImageInput[];
+  answerKeyImage?: ReadImageResult | null;
+  exerciseImages: ReadImageResult[];
   classroomId?: string | null;
   studentId?: string | null;
   homeworkUnitId?: string | null;
@@ -55,50 +39,125 @@ type StartCheckInput = {
 type CreateHomeworkUnitInput = { name: string; subject: string; grade: string };
 type HomeworkUnitFileGroup = "exercises" | "answerKeys" | "teachingMaterials";
 
+const GROUP_MAP: Record<HomeworkUnitFileGroup, HomeworkFileGroup> = {
+  exercises: "exercise",
+  answerKeys: "answer_key",
+  teachingMaterials: "material",
+};
+
+// tasks/notifications are cosmetic widgets that were never part of the
+// approved DB schema (see README) — kept as static local data so the
+// existing Topbar notification badge keeps working unchanged.
+const STATIC_NOTIFICATIONS = [
+  { title: "มีงานรอตรวจสอบ", detail: "AI ตรวจแบบฝึกหัดเสร็จแล้ว รอครูยืนยันผล", time: "เมื่อสักครู่" },
+];
+
 type AppDataContextValue = {
+  loading: boolean;
+  teacherName: string;
+  signOut: () => Promise<void>;
+
   classrooms: Classroom[];
-  tasks: typeof initialTasks;
-  notifications: typeof initialNotifications;
+  tasks: never[];
+  notifications: typeof STATIC_NOTIFICATIONS;
   pendingReviewCount: number;
   getClassroom: (id: string) => Classroom | undefined;
   getStudent: (classroomId: string, studentId: string) => Student | undefined;
-  createClassroom: (input: CreateClassroomInput) => string;
-  addStudent: (classroomId: string, input: AddStudentInput) => string;
+  createClassroom: (input: CreateClassroomInput) => Promise<string>;
+  addStudent: (classroomId: string, input: AddStudentInput) => Promise<string>;
   addSavedPlan: (classroomId: string, topic: string, rows: PlanRow[]) => void;
   addSavedTechnique: (classroomId: string, result: TechniqueResult) => void;
   showCreateModal: boolean;
   openCreateModal: (onDone?: (classroomId: string) => void) => void;
   closeCreateModal: () => void;
 
-  // Checks (Quick Check + classroom-bound checks share this pipeline)
   checks: Check[];
   getCheck: (id: string) => Check | undefined;
   getChecksForStudent: (classroomId: string, studentId: string) => Check[];
   getChecksForClassroom: (classroomId: string) => Check[];
   getRecentChecks: (limit?: number) => Check[];
   startCheck: (input: StartCheckInput) => Promise<string>;
-  correctQuestion: (checkId: string, questionId: string, correction: QuestionResult) => void;
-  markReviewed: (checkId: string) => void;
-  saveCheckToProfile: (checkId: string, classroomId: string, studentId: string) => void;
+  correctQuestion: (checkId: string, questionId: string, correction: QuestionResult) => Promise<void>;
+  markReviewed: (checkId: string) => Promise<void>;
+  saveCheckToProfile: (checkId: string, classroomId: string, studentId: string) => Promise<void>;
 
-  // Homework Units — separate entity from Classroom
   homeworkUnits: HomeworkUnit[];
   getHomeworkUnit: (id: string) => HomeworkUnit | undefined;
-  createHomeworkUnit: (input: CreateHomeworkUnitInput) => string;
-  addFileToUnit: (unitId: string, group: HomeworkUnitFileGroup, name: string, kind: FileKind) => void;
+  createHomeworkUnit: (input: CreateHomeworkUnitInput) => Promise<string>;
+  addFileToUnit: (unitId: string, group: HomeworkUnitFileGroup, file: File, kind: FileKind) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
-  const [classrooms, setClassrooms] = useState<Classroom[]>(initialClassrooms);
-  const [tasks] = useState(initialTasks);
-  const [notifications] = useState(initialNotifications);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState("");
+
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [homeworkUnits, setHomeworkUnits] = useState<HomeworkUnit[]>([]);
+  const [checks, setChecks] = useState<Check[]>([]);
+  // addSavedPlan/addSavedTechnique are deliberately NOT persisted (see README:
+  // "known simplifications" — not part of the approved schema). Kept as local
+  // state merged onto classrooms at read time so GeneratePanel keeps working.
+  const [savedExtras, setSavedExtras] = useState<Record<string, { savedPlans: SavedPlan[]; savedTechniques: TechniqueResult[] }>>({});
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createModalCallback, setCreateModalCallback] = useState<((id: string) => void) | null>(null);
 
-  const [checks, setChecks] = useState<Check[]>(() => buildSeedChecks());
-  const [homeworkUnits, setHomeworkUnits] = useState<HomeworkUnit[]>(() => buildSeedHomeworkUnits());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabaseBrowserClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+      setUserId(user.id);
+
+      const [profileRes, classroomList, unitList, checkList] = await Promise.all([
+        supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+        classroomsApi.listClassrooms(supabase),
+        homeworkUnitsApi.listHomeworkUnits(supabase),
+        submissionsApi.listRecentSubmissions(supabase, 500),
+      ]);
+
+      if (cancelled) return;
+      setTeacherName(profileRes.data?.display_name || "ครูผู้สอน");
+      setClassrooms(classroomList);
+      setHomeworkUnits(unitList);
+      setChecks(checkList);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    // Hard navigation (not router.push) is intentional here: it guarantees
+    // every piece of in-memory app state (classrooms/checks/etc.) is dropped
+    // on sign-out rather than briefly lingering from the previous session.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = "/login";
+  }, []);
+
+  const classroomsWithExtras = useMemo(
+    () =>
+      classrooms.map((c) => ({
+        ...c,
+        savedPlans: savedExtras[c.id]?.savedPlans,
+        savedTechniques: savedExtras[c.id]?.savedTechniques,
+      })),
+    [classrooms, savedExtras]
+  );
 
   const openCreateModal = useCallback((onDone?: (classroomId: string) => void) => {
     setCreateModalCallback(() => onDone ?? null);
@@ -109,49 +168,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setCreateModalCallback(null);
   }, []);
 
-  const getClassroom = useCallback((id: string) => classrooms.find((c) => c.id === id), [classrooms]);
+  const getClassroom = useCallback((id: string) => classroomsWithExtras.find((c) => c.id === id), [classroomsWithExtras]);
 
   const getStudent = useCallback(
     (classroomId: string, studentId: string) => {
-      const classroom = classrooms.find((c) => c.id === classroomId);
+      const classroom = classroomsWithExtras.find((c) => c.id === classroomId);
       return classroom?.students.find((s) => s.id === studentId);
     },
-    [classrooms]
+    [classroomsWithExtras]
   );
 
   const createClassroom = useCallback(
-    (input: CreateClassroomInput) => {
-      const id = "c" + Date.now();
-      const students: Student[] = (input.students ?? []).map((s, i) => ({
-        id: "s" + Date.now() + "-" + i,
-        name: s.name?.trim() || `นักเรียน ${s.studentId}`,
-        studentId: s.studentId,
-        seatNo: s.seatNo ?? i + 1,
-        gender: s.gender ?? "M",
-        problems: [],
-        homework: { status: "none", hasFile: false, hasAnswer: false, confirmed: false },
-      }));
-      const newClassroom: Classroom = {
-        id,
-        name: input.name || "ห้องเรียนใหม่",
-        subject: "คณิตศาสตร์",
-        grade: input.grade || "-",
-        term: "ภาคเรียนที่ 1/2567",
-        teacher: "ครูจิราภรณ์",
-        exercises: { total: 0, completed: 0, inProgress: 0 },
-        avgScore: 0,
-        avgDelta: 0,
-        riskCount: 0,
-        trend: [],
-        distribution: [],
-        groups: { excellent: 0, good: 0, developing: 0, support: 0 },
-        subjectScores: [],
-        topStudents: [],
-        latestExercises: [],
-        problems: input.problems,
-        students,
-      };
-      setClassrooms((prev) => [...prev, newClassroom]);
+    async (input: CreateClassroomInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await classroomsApi.createClassroom(supabase, userId, input);
+      const fresh = await classroomsApi.getClassroom(supabase, id);
+      if (fresh) setClassrooms((prev) => [fresh, ...prev]);
       setShowCreateModal(false);
       if (createModalCallback) {
         createModalCallback(id);
@@ -159,42 +192,35 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       }
       return id;
     },
-    [createModalCallback]
+    [userId, createModalCallback]
   );
 
-  const addStudent = useCallback((classroomId: string, input: AddStudentInput) => {
-    const id = "s" + Date.now();
-    const newStudent: Student = {
-      id,
-      name: input.name,
-      studentId: input.studentId,
-      seatNo: input.seatNo,
-      gender: input.gender,
-      problems: [],
-      homework: { status: "none", hasFile: false, hasAnswer: false, confirmed: false },
-    };
-    setClassrooms((prev) =>
-      prev.map((c) => (c.id !== classroomId ? c : { ...c, students: [...c.students, newStudent] }))
-    );
+  const addStudent = useCallback(async (classroomId: string, input: AddStudentInput): Promise<string> => {
+    const supabase = getSupabaseBrowserClient();
+    const id = await classroomsApi.addStudent(supabase, classroomId, input);
+    const fresh = await classroomsApi.getClassroom(supabase, classroomId);
+    if (fresh) setClassrooms((prev) => prev.map((c) => (c.id === classroomId ? fresh : c)));
     return id;
   }, []);
 
   const addSavedPlan = useCallback((classroomId: string, topic: string, rows: PlanRow[]) => {
-    setClassrooms((prev) =>
-      prev.map((c) =>
-        c.id !== classroomId
-          ? c
-          : { ...c, savedPlans: [...(c.savedPlans || []), { topic: topic || "บทเรียนนี้", rows }] }
-      )
-    );
+    setSavedExtras((prev) => ({
+      ...prev,
+      [classroomId]: {
+        savedPlans: [...(prev[classroomId]?.savedPlans ?? []), { topic: topic || "บทเรียนนี้", rows }],
+        savedTechniques: prev[classroomId]?.savedTechniques ?? [],
+      },
+    }));
   }, []);
 
   const addSavedTechnique = useCallback((classroomId: string, result: TechniqueResult) => {
-    setClassrooms((prev) =>
-      prev.map((c) =>
-        c.id !== classroomId ? c : { ...c, savedTechniques: [...(c.savedTechniques || []), result] }
-      )
-    );
+    setSavedExtras((prev) => ({
+      ...prev,
+      [classroomId]: {
+        savedPlans: prev[classroomId]?.savedPlans ?? [],
+        savedTechniques: [...(prev[classroomId]?.savedTechniques ?? []), result],
+      },
+    }));
   }, []);
 
   // ---------------- Checks ----------------
@@ -219,127 +245,107 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [checks]
   );
 
-  const startCheck = useCallback((input: StartCheckInput): Promise<string> => {
-    const id = "chk" + Date.now();
-    const placeholder: Check = {
-      id,
-      createdAt: new Date().toISOString(),
-      status: "processing",
-      studentLabel: input.studentLabel,
-      topic: input.topic,
-      exerciseImages: input.exerciseImages.map((i) => i.dataUrl),
-      questions: [],
-      overallScore: 0,
-      homeworkUnitId: input.homeworkUnitId ?? null,
-      classroomId: input.classroomId ?? null,
-      studentId: input.studentId ?? null,
-      savedToProfile: null,
-    };
-    setChecks((prev) => [placeholder, ...prev]);
-
-    // Run the AI pipeline in the background — callers get the id immediately so
-    // they can navigate straight to the (live-updating) processing/result view.
-    void (async () => {
-      try {
-        const res = await fetch("/api/process-check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          studentLabel: input.studentLabel,
-          topic: input.topic,
-          teachingMaterialsText: input.teachingMaterialsText,
-          answerKeyText: input.answerKeyText,
-          answerKeyImage: input.answerKeyImage
-            ? { base64: input.answerKeyImage.base64, mediaType: input.answerKeyImage.mediaType }
-            : null,
-          exerciseImages: input.exerciseImages.map(({ base64, mediaType }) => ({ base64, mediaType })),
-        }),
-      });
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
-      }
-
-      type RawQuestion = {
-        question: string;
-        student_answer: string;
-        expected_answer: string;
-        keywords?: string[];
-        features?: string[];
-        context?: string[];
-        extraction_confidence?: number;
-        is_correct: boolean;
-        score?: number;
-        error_type?: string;
-        concept_issue?: string;
-        reasoning?: string;
-        areas_to_improve?: string[];
-        evaluation_confidence?: number;
+  const startCheck = useCallback(
+    (input: StartCheckInput): Promise<string> => {
+      const id = crypto.randomUUID();
+      const placeholder: Check = {
+        id,
+        createdAt: new Date().toISOString(),
+        status: "processing",
+        studentLabel: input.studentLabel,
+        topic: input.topic,
+        exerciseImages: input.exerciseImages.map((i) => i.dataUrl),
+        questions: [],
+        overallScore: 0,
+        homeworkUnitId: input.homeworkUnitId ?? null,
+        classroomId: input.classroomId ?? null,
+        studentId: input.studentId ?? null,
+        savedToProfile: null,
       };
+      setChecks((prev) => [placeholder, ...prev]);
 
-      const questions: CheckQuestion[] = ((body.questions ?? []) as RawQuestion[]).map((rq, idx) => ({
-        id: `${id}-q${idx + 1}`,
-        question: rq.question ?? "",
-        studentAnswer: rq.student_answer ?? "",
-        expectedAnswer: rq.expected_answer ?? "",
-        keywords: rq.keywords ?? [],
-        features: rq.features ?? [],
-        context: rq.context ?? [],
-        extractionConfidence: rq.extraction_confidence ?? 0.8,
-        ai: {
-          isCorrect: !!rq.is_correct,
-          score: rq.score ?? (rq.is_correct ? 1 : 0),
-          errorType: rq.error_type ?? "",
-          conceptIssue: rq.concept_issue ?? "",
-          reasoning: rq.reasoning ?? "",
-          areasToImprove: rq.areas_to_improve ?? [],
-          evaluationConfidence: rq.evaluation_confidence ?? 0.8,
-        },
-        teacherCorrected: null,
-      }));
+      void (async () => {
+        try {
+          if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+          const supabase = getSupabaseBrowserClient();
+
+          const exerciseFileRefs = [];
+          for (const img of input.exerciseImages) {
+            exerciseFileRefs.push(await submissionsApi.uploadSubmissionFile(supabase, userId, id, img.file));
+          }
+          const answerKeyFileRef = input.answerKeyImage
+            ? await submissionsApi.uploadSubmissionFile(supabase, userId, id, input.answerKeyImage.file)
+            : null;
+
+          await submissionsApi.createSubmissionShell(supabase, userId, {
+            id,
+            studentLabel: input.studentLabel,
+            topic: input.topic,
+            exerciseFiles: exerciseFileRefs,
+            answerKeyFile: answerKeyFileRef,
+            answerKeyText: input.answerKeyText,
+            teachingMaterialsText: input.teachingMaterialsText,
+            classroomId: input.classroomId,
+            studentId: input.studentId,
+            homeworkUnitId: input.homeworkUnitId,
+          });
+
+          const res = await fetch("/api/process-check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ submissionId: id }),
+          });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+
+          const refreshed = await submissionsApi.getSubmission(supabase, id);
+          if (refreshed) {
+            setChecks((prev) => [refreshed, ...prev.filter((c) => c.id !== id)]);
+          }
+        } catch (err) {
+          setChecks((prev) =>
+            prev.map((c) =>
+              c.id === id
+                ? { ...c, status: "failed", errorMessage: err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการตรวจ" }
+                : c
+            )
+          );
+        }
+      })();
+
+      return Promise.resolve(id);
+    },
+    [userId]
+  );
+
+  const correctQuestion = useCallback(
+    async (checkId: string, questionId: string, correction: QuestionResult) => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const evaluationId = await submissionsApi.getEvaluationIdForQuestion(supabase, questionId);
+      if (!evaluationId) throw new Error("ไม่พบข้อมูลการตรวจของข้อนี้");
+      await submissionsApi.upsertTeacherCorrection(supabase, evaluationId, userId, correction);
 
       setChecks((prev) =>
-        prev.map((c) =>
-          c.id === id
-            ? { ...c, status: "needs_review", questions, overallScore: computeOverallScore(questions) }
-            : c
-        )
+        prev.map((c) => {
+          if (c.id !== checkId) return c;
+          const questions = c.questions.map((q) => (q.id === questionId ? { ...q, teacherCorrected: correction } : q));
+          return { ...c, questions, overallScore: computeOverallScore(questions) };
+        })
       );
-      } catch (err) {
-        setChecks((prev) =>
-          prev.map((c) =>
-            c.id === id
-              ? {
-                  ...c,
-                  status: "failed",
-                  errorMessage: err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการตรวจ",
-                }
-              : c
-          )
-        );
-      }
-    })();
+    },
+    [userId]
+  );
 
-    return Promise.resolve(id);
-  }, []);
-
-  const correctQuestion = useCallback((checkId: string, questionId: string, correction: QuestionResult) => {
-    setChecks((prev) =>
-      prev.map((c) => {
-        if (c.id !== checkId) return c;
-        const questions = c.questions.map((qq) =>
-          qq.id === questionId ? { ...qq, teacherCorrected: correction } : qq
-        );
-        return { ...c, questions, overallScore: computeOverallScore(questions) };
-      })
-    );
-  }, []);
-
-  const markReviewed = useCallback((checkId: string) => {
+  const markReviewed = useCallback(async (checkId: string) => {
+    const supabase = getSupabaseBrowserClient();
+    await submissionsApi.markSubmissionReviewed(supabase, checkId);
     setChecks((prev) => prev.map((c) => (c.id === checkId ? { ...c, status: "reviewed" } : c)));
   }, []);
 
-  const saveCheckToProfile = useCallback((checkId: string, classroomId: string, studentId: string) => {
+  const saveCheckToProfile = useCallback(async (checkId: string, classroomId: string, studentId: string) => {
+    const supabase = getSupabaseBrowserClient();
+    await submissionsApi.linkSubmissionToProfile(supabase, checkId, classroomId, studentId);
     setChecks((prev) =>
       prev.map((c) =>
         c.id === checkId
@@ -359,46 +365,39 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
   const getHomeworkUnit = useCallback((id: string) => homeworkUnits.find((u) => u.id === id), [homeworkUnits]);
 
-  const createHomeworkUnit = useCallback((input: CreateHomeworkUnitInput) => {
-    const id = "hu" + Date.now();
-    setHomeworkUnits((prev) => [
-      ...prev,
-      { id, ...input, createdAt: new Date().toISOString(), exercises: [], answerKeys: [], teachingMaterials: [] },
-    ]);
-    return id;
-  }, []);
+  const createHomeworkUnit = useCallback(
+    async (input: CreateHomeworkUnitInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await homeworkUnitsApi.createHomeworkUnit(supabase, userId, input);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, id);
+      if (fresh) setHomeworkUnits((prev) => [fresh, ...prev]);
+      return id;
+    },
+    [userId]
+  );
 
   const addFileToUnit = useCallback(
-    (unitId: string, group: HomeworkUnitFileGroup, name: string, kind: FileKind) => {
-      setHomeworkUnits((prev) =>
-        prev.map((u) =>
-          u.id !== unitId
-            ? u
-            : {
-                ...u,
-                [group]: [
-                  ...u[group],
-                  {
-                    id: "f" + Date.now() + Math.random().toString(36).slice(2, 6),
-                    name,
-                    kind,
-                    addedAt: new Date().toISOString(),
-                  },
-                ],
-              }
-        )
-      );
+    async (unitId: string, group: HomeworkUnitFileGroup, file: File, kind: FileKind) => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, GROUP_MAP[group], file, kind);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, unitId);
+      if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === unitId ? fresh : u)));
     },
-    []
+    [userId]
   );
 
   const pendingReviewCount = useMemo(() => checks.filter((c) => c.status === "needs_review").length, [checks]);
 
   const value = useMemo<AppDataContextValue>(
     () => ({
-      classrooms,
-      tasks,
-      notifications,
+      loading,
+      teacherName,
+      signOut,
+      classrooms: classroomsWithExtras,
+      tasks: [],
+      notifications: STATIC_NOTIFICATIONS,
       pendingReviewCount,
       getClassroom,
       getStudent,
@@ -424,9 +423,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       addFileToUnit,
     }),
     [
-      classrooms,
-      tasks,
-      notifications,
+      loading,
+      teacherName,
+      signOut,
+      classroomsWithExtras,
       pendingReviewCount,
       getClassroom,
       getStudent,
