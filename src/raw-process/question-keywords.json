@@ -1,0 +1,156 @@
+[
+  {
+    "phrase": "เหตุใด",
+    "category": "interrogative",
+    "weight": 0.35,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "เพราะเหตุใด",
+    "category": "interrogative",
+    "weight": 0.4,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "อย่างไร",
+    "category": "interrogative",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "อะไร",
+    "category": "interrogative",
+    "weight": 0.25,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "ใดบ้าง",
+    "category": "interrogative",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "กี่",
+    "category": "quantity",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "เท่าใด",
+    "category": "quantity",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "เท่าไร",
+    "category": "quantity",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "ได้ทั้งหมดกี่",
+    "category": "quantity",
+    "weight": 0.4,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "จงหา",
+    "category": "instruction",
+    "weight": 0.4,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "จงคำนวณ",
+    "category": "instruction",
+    "weight": 0.4,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "จงอธิบาย",
+    "category": "instruction",
+    "weight": 0.35,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "อธิบาย",
+    "category": "explanation",
+    "weight": 0.25,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "เปรียบเทียบ",
+    "category": "comparison",
+    "weight": 0.25,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "ยกตัวอย่าง",
+    "category": "explanation",
+    "weight": 0.25,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "ได้กี่แบบ",
+    "category": "quantity",
+    "weight": 0.95,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "กี่คำ",
+    "category": "quantity",
+    "weight": 0.9,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "แตกต่างกันได้กี่แบบ",
+    "category": "quantity",
+    "weight": 0.95,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "คืออะไร",
+    "category": "interrogative",
+    "weight": 0.9,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "เรื่องใด",
+    "category": "interrogative",
+    "weight": 0.75,
+    "source": "manual",
+    "verified": true
+  },
+  {
+    "phrase": "ประเทศใดบ้าง",
+    "category": "interrogative",
+    "weight": 0.95,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "ประกอบด้วย",
+    "category": "interrogative",
+    "weight": 0.3,
+    "source": "manual",
+    "verified": true
+  }
+]
