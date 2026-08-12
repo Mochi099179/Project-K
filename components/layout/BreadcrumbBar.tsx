@@ -5,7 +5,13 @@ import { useAppData } from "@/lib/store";
 
 export type Crumb = { label: string; href?: string };
 
-export function BreadcrumbBar({ tail }: { tail?: string }) {
+export function BreadcrumbBar({
+  section = { label: "ห้องเรียน", href: "/classrooms" },
+  tail,
+}: {
+  section?: { label: string; href: string };
+  tail?: string;
+}) {
   const { notifications } = useAppData();
 
   return (
@@ -15,8 +21,8 @@ export function BreadcrumbBar({ tail }: { tail?: string }) {
           หน้าหลัก
         </Link>
         <span>›</span>
-        <Link href="/classrooms" className="hover:text-ink">
-          ห้องเรียน
+        <Link href={section.href} className="hover:text-ink">
+          {section.label}
         </Link>
         {tail ? (
           <>

@@ -4,12 +4,13 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useAppData } from "@/lib/store";
 import { BreadcrumbBar } from "@/components/layout/BreadcrumbBar";
-import { HomeworkPanel } from "@/components/student/HomeworkPanel";
+import { CheckHomeworkPanel } from "@/components/student/CheckHomeworkPanel";
+import { LearningProfileCard } from "@/components/student/LearningProfileCard";
 import { HistoryPanel } from "@/components/student/HistoryPanel";
 
 export default function StudentProfilePage() {
   const params = useParams<{ classroomId: string; studentId: string }>();
-  const { getClassroom, getStudent, sendToAI, confirmGrading } = useAppData();
+  const { getClassroom, getStudent, getChecksForStudent } = useAppData();
 
   const classroom = getClassroom(params.classroomId);
   const student = getStudent(params.classroomId, params.studentId);
@@ -23,26 +24,20 @@ export default function StudentProfilePage() {
     );
   }
 
+  const checks = getChecksForStudent(classroom.id, student.id);
   const hasHistory = (student.history?.length ?? 0) > 1;
 
   return (
     <div>
       <BreadcrumbBar tail={`${classroom.name} ${classroom.subject} / ${student.name}`} />
       <div className="px-6 py-8 pb-20 sm:px-10">
-        <div className="mx-auto max-w-[760px]">
-          <Link
-            href={`/classrooms/${classroom.id}`}
-            className="mb-4 inline-block text-[12.5px] font-semibold text-primary"
-          >
+        <div className="mx-auto max-w-[820px]">
+          <Link href={`/classrooms/${classroom.id}`} className="mb-4 inline-block text-[12.5px] font-semibold text-primary">
             ← กลับไปที่ {classroom.name}
           </Link>
 
-          <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-primary">
-            Student Profile
-          </div>
-          <h1 className="mb-2 text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.2rem]">
-            {student.name}
-          </h1>
+          <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.2em] text-primary">Student Profile</div>
+          <h1 className="mb-2 text-[2rem] font-semibold tracking-tight text-ink sm:text-[2.2rem]">{student.name}</h1>
           <p className="mb-4 font-mono text-[13px] text-ink/50">
             เลขที่ {student.seatNo} · รหัสประจำตัว {student.studentId}
           </p>
@@ -54,20 +49,19 @@ export default function StudentProfilePage() {
             ))}
           </div>
 
+          <h2 className="mb-4 text-[1.15rem] font-semibold text-ink">Learning Profile</h2>
+          <div className="mb-10">
+            <LearningProfileCard checks={checks} />
+          </div>
+
           <h2 className="mb-4 text-[1.15rem] font-semibold text-ink">Homework &amp; AI Grading</h2>
           <div className="mb-10">
-            <HomeworkPanel
-              student={student}
-              onSend={(payload) => sendToAI(classroom.id, student.id, payload)}
-              onConfirm={() => confirmGrading(classroom.id, student.id)}
-            />
+            <CheckHomeworkPanel classroom={classroom} student={student} />
           </div>
 
           {hasHistory && (
             <>
-              <h2 className="mb-4 text-[1.15rem] font-semibold text-ink">
-                ประวัติการบ้านและเปรียบเทียบคะแนน AI
-              </h2>
+              <h2 className="mb-4 text-[1.15rem] font-semibold text-ink">ประวัติการบ้านและเปรียบเทียบคะแนน</h2>
               <HistoryPanel history={student.history!} />
             </>
           )}

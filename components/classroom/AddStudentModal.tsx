@@ -19,12 +19,12 @@ export function AddStudentModal({
   const [seatNo, setSeatNo] = useState(String(nextSeatNo));
   const [gender, setGender] = useState<"M" | "F">("M");
 
-  const canSubmit = name.trim() !== "" && studentId.trim() !== "" && seatNo.trim() !== "";
+  const canSubmit = studentId.trim() !== "" && seatNo.trim() !== "";
 
   function handleSubmit() {
     if (!canSubmit) return;
     addStudent(classroomId, {
-      name: name.trim(),
+      name: name.trim() || `นักเรียน ${studentId.trim()}`,
       studentId: studentId.trim(),
       seatNo: Number(seatNo) || nextSeatNo,
       gender,
@@ -41,7 +41,7 @@ export function AddStudentModal({
 
         <h2 className="mb-6 text-2xl font-semibold text-ink">เพิ่มนักเรียน</h2>
 
-        <label className="mb-2 block text-xs text-ink/55">ชื่อ-นามสกุล</label>
+        <label className="mb-2 block text-xs text-ink/55">ชื่อ-นามสกุล (ไม่บังคับ)</label>
         <input
           type="text"
           value={name}
