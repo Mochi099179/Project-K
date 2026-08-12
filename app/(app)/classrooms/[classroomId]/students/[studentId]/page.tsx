@@ -9,7 +9,7 @@ import { HistoryPanel } from "@/components/student/HistoryPanel";
 
 export default function StudentProfilePage() {
   const params = useParams<{ classroomId: string; studentId: string }>();
-  const { getClassroom, getStudent, toggleHasFile, toggleHasAnswer, sendToAI, confirmGrading } = useAppData();
+  const { getClassroom, getStudent, sendToAI, confirmGrading } = useAppData();
 
   const classroom = getClassroom(params.classroomId);
   const student = getStudent(params.classroomId, params.studentId);
@@ -58,9 +58,7 @@ export default function StudentProfilePage() {
           <div className="mb-10">
             <HomeworkPanel
               student={student}
-              onToggleFile={() => toggleHasFile(classroom.id, student.id)}
-              onToggleAnswer={() => toggleHasAnswer(classroom.id, student.id)}
-              onSend={() => sendToAI(classroom.id, student.id)}
+              onSend={(payload) => sendToAI(classroom.id, student.id, payload)}
               onConfirm={() => confirmGrading(classroom.id, student.id)}
             />
           </div>
