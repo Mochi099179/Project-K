@@ -17,6 +17,12 @@ type AddStudentInput = {
   gender: "M" | "F";
 };
 
+type SendToAIInput = {
+  imageBase64: string;
+  mediaType: string;
+  answerKeyText: string;
+};
+
 type AppDataContextValue = {
   classrooms: Classroom[];
   tasks: typeof initialTasks;
@@ -26,9 +32,7 @@ type AppDataContextValue = {
   getStudent: (classroomId: string, studentId: string) => Student | undefined;
   createClassroom: (input: CreateClassroomInput) => string;
   addStudent: (classroomId: string, input: AddStudentInput) => void;
-  toggleHasFile: (classroomId: string, studentId: string) => void;
-  toggleHasAnswer: (classroomId: string, studentId: string) => void;
-  sendToAI: (classroomId: string, studentId: string) => void;
+  sendToAI: (classroomId: string, studentId: string, input: SendToAIInput) => Promise<void>;
   confirmGrading: (classroomId: string, studentId: string) => void;
   addSavedPlan: (classroomId: string, topic: string, rows: PlanRow[]) => void;
   addSavedTechnique: (classroomId: string, result: TechniqueResult) => void;
@@ -38,12 +42,6 @@ type AppDataContextValue = {
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
-
-const MOCK_GRADE_SETS = [
-  { score: 82, strengths: ["เข้าใจแนวคิดหลักของบทเรียนได้ดี", "ลำดับขั้นตอนการตอบชัดเจน"], weaknesses: ["สรุปใจความสำคัญยังไม่ครบถ้วน"], suggestions: ["ฝึกสรุปบทเรียนด้วยแผนภาพก่อนทำโจทย์"] },
-  { score: 74, strengths: ["ตั้งใจทำแบบฝึกหัดจนจบ"], weaknesses: ["ใช้เวลาทำโจทย์นานกว่าเพื่อน"], suggestions: ["แบ่งโจทย์เป็นชุดย่อยเพื่อลดความกดดันเรื่องเวลา"] },
-  { score: 90, strengths: ["ตอบคำถามได้ถูกต้องครบถ้วน"], weaknesses: ["ไม่ค่อยอธิบายเหตุผลประกอบ"], suggestions: ['กระตุ้นให้อธิบาย "ทำไม" ทุกครั้งที่ตอบ'] },
-];
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [classrooms, setClassrooms] = useState<Classroom[]>(initialClassrooms);
@@ -127,32 +125,38 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
-  const toggleHasFile = useCallback(
-    (classroomId: string, studentId: string) => {
-      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, hasFile: !hw.hasFile }));
-    },
-    [updateStudentHomework]
-  );
-
-  const toggleHasAnswer = useCallback(
-    (classroomId: string, studentId: string) => {
-      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, hasAnswer: !hw.hasAnswer }));
-    },
-    [updateStudentHomework]
-  );
-
   const sendToAI = useCallback(
-    (classroomId: string, studentId: string) => {
-      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, status: "grading" }));
-      setTimeout(() => {
-        const mock = MOCK_GRADE_SETS[Math.floor(Math.random() * MOCK_GRADE_SETS.length)];
+    async (classroomId: string, studentId: string, input: SendToAIInput) => {
+      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, status: "grading", error: undefined }));
+      try {
+        const res = await fetch("/api/analyze-homework", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+        }
         updateStudentHomework(classroomId, studentId, (hw) => ({
           ...hw,
           status: "graded",
           confirmed: false,
-          ...mock,
+          hasFile: true,
+          hasAnswer: true,
+          score: body.score,
+          strengths: body.strengths,
+          weaknesses: body.weaknesses,
+          suggestions: body.suggestions,
+          transcription: body.transcription,
         }));
-      }, 1600);
+      } catch (err) {
+        updateStudentHomework(classroomId, studentId, (hw) => ({
+          ...hw,
+          status: "none",
+          error: err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการตรวจ",
+        }));
+      }
     },
     [updateStudentHomework]
   );
@@ -204,8 +208,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getStudent,
       createClassroom,
       addStudent,
-      toggleHasFile,
-      toggleHasAnswer,
       sendToAI,
       confirmGrading,
       addSavedPlan,
@@ -223,8 +225,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getStudent,
       createClassroom,
       addStudent,
-      toggleHasFile,
-      toggleHasAnswer,
       sendToAI,
       confirmGrading,
       addSavedPlan,
