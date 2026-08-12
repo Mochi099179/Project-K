@@ -9,6 +9,8 @@ export type Homework = {
   strengths?: string[];
   weaknesses?: string[];
   suggestions?: string[];
+  transcription?: string;
+  error?: string;
 };
 
 export type HistoryEntry = {
