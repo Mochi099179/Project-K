@@ -31,7 +31,7 @@ export async function detectQuestionCandidate(
   block: MarkdownBlock
 ): Promise<QuestionCandidate | null> {
 
-  console.log(block)
+  console.log(block) //-> crucial, you need to save this separately later, also good for debugging.
   const lines =
     block.text
       .split("\n")

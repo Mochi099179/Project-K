@@ -152,5 +152,19 @@
     "weight": 0.3,
     "source": "manual",
     "verified": true
+  },
+  {
+    "phrase": "กำหนดให้",
+    "category": "instruction",
+    "weight": 0.85,
+    "source": "ai",
+    "verified": true
+  },
+  {
+    "phrase": "จงหาค่าของ",
+    "category": "instruction",
+    "weight": 0.95,
+    "source": "ai",
+    "verified": true
   }
 ]
