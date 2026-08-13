@@ -36,6 +36,7 @@ export interface Database {
         Update: {
           display_name?: string;
         };
+        Relationships: [];
       };
       classrooms: {
         Row: {
@@ -59,6 +60,15 @@ export interface Database {
           learning_problems?: Json;
         };
         Update: Partial<Database["public"]["Tables"]["classrooms"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "classrooms_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       students: {
         Row: {
@@ -82,6 +92,15 @@ export interface Database {
           problems?: Json;
         };
         Update: Partial<Database["public"]["Tables"]["students"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "students_classroom_id_fkey";
+            columns: ["classroom_id"];
+            isOneToOne: false;
+            referencedRelation: "classrooms";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       homework_units: {
         Row: {
@@ -101,6 +120,15 @@ export interface Database {
           grade?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["homework_units"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "homework_units_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       homework_unit_files: {
         Row: {
@@ -123,6 +151,22 @@ export interface Database {
           file_kind?: FileKindEnum;
         };
         Update: Partial<Database["public"]["Tables"]["homework_unit_files"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "homework_unit_files_homework_unit_id_fkey";
+            columns: ["homework_unit_id"];
+            isOneToOne: false;
+            referencedRelation: "homework_units";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "homework_unit_files_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       submissions: {
         Row: {
@@ -164,6 +208,43 @@ export interface Database {
           saved_to_profile_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["submissions"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "submissions_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "submissions_student_id_fkey";
+            columns: ["student_id"];
+            isOneToOne: false;
+            referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "submissions_classroom_id_fkey";
+            columns: ["classroom_id"];
+            isOneToOne: false;
+            referencedRelation: "classrooms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "submissions_homework_unit_id_fkey";
+            columns: ["homework_unit_id"];
+            isOneToOne: false;
+            referencedRelation: "homework_units";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "submissions_exercise_id_fkey";
+            columns: ["exercise_id"];
+            isOneToOne: false;
+            referencedRelation: "exercises";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       exercises: {
         Row: {
@@ -193,6 +274,22 @@ export interface Database {
           max_score?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["exercises"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "exercises_homework_unit_id_fkey";
+            columns: ["homework_unit_id"];
+            isOneToOne: false;
+            referencedRelation: "homework_units";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "exercises_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       answer_keys: {
         Row: {
@@ -215,6 +312,22 @@ export interface Database {
           answer_text?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["answer_keys"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "answer_keys_exercise_id_fkey";
+            columns: ["exercise_id"];
+            isOneToOne: true;
+            referencedRelation: "exercises";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "answer_keys_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       questions: {
         Row: {
@@ -243,6 +356,15 @@ export interface Database {
           extraction_confidence?: number;
         };
         Update: Partial<Database["public"]["Tables"]["questions"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "questions_submission_id_fkey";
+            columns: ["submission_id"];
+            isOneToOne: false;
+            referencedRelation: "submissions";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       evaluations: {
         Row: {
@@ -269,6 +391,15 @@ export interface Database {
           evaluation_confidence?: number;
         };
         Update: Partial<Database["public"]["Tables"]["evaluations"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "evaluations_question_id_fkey";
+            columns: ["question_id"];
+            isOneToOne: true;
+            referencedRelation: "questions";
+            referencedColumns: ["id"];
+          }
+        ];
       };
       teacher_corrections: {
         Row: {
@@ -296,6 +427,22 @@ export interface Database {
           note?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["teacher_corrections"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "teacher_corrections_evaluation_id_fkey";
+            columns: ["evaluation_id"];
+            isOneToOne: true;
+            referencedRelation: "evaluations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "teacher_corrections_teacher_id_fkey";
+            columns: ["teacher_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          }
+        ];
       };
     };
     Views: {
@@ -321,12 +468,15 @@ export interface Database {
           areas_to_improve: Json;
           is_teacher_corrected: boolean;
         };
+        Relationships: [];
       };
     };
+    Functions: Record<string, never>;
     Enums: {
       submission_status: SubmissionStatus;
       homework_file_group: HomeworkFileGroup;
       file_kind: FileKindEnum;
     };
+    CompositeTypes: Record<string, never>;
   };
 }
