@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useAppData } from "@/lib/store";
 import { readImageFile, ACCEPTED_IMAGE_TYPES, type ReadImageResult } from "@/lib/files";
@@ -35,11 +35,12 @@ export function HomeworkUnitCheckFlow({
   const exercises = selectedUnit?.exercises ?? [];
   const selectedExercise = exercises.find((e) => e.id === exerciseId) ?? null;
 
-  // Whenever the Homework Unit changes, drop any Exercise selection from the
-  // previous unit — the dropdown below is always scoped to the current one.
-  useEffect(() => {
+  function handleHomeworkUnitChange(id: string | null) {
+    // Drop any Exercise selection from the previous unit — the dropdown
+    // below is always scoped to the current one.
+    setHomeworkUnitId(id);
     setExerciseId(null);
-  }, [homeworkUnitId]);
+  }
 
   async function handleFiles(files: FileList | null) {
     if (!files) return;
@@ -94,7 +95,7 @@ export function HomeworkUnitCheckFlow({
       <label className="mb-2 block text-xs text-ink/55">Homework Unit</label>
       <select
         value={homeworkUnitId ?? ""}
-        onChange={(e) => setHomeworkUnitId(e.target.value || null)}
+        onChange={(e) => handleHomeworkUnitChange(e.target.value || null)}
         className="mb-4.5 w-full rounded-xl border border-border bg-cream px-4 py-3 text-sm text-ink outline-none"
       >
         <option value="">— เลือก Homework Unit —</option>
