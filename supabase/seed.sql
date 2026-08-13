@@ -71,3 +71,74 @@ begin
 
   raise notice 'Seeded classroom % for owner %', v_classroom_id, v_owner_id;
 end $$;
+
+-- ============================================================================
+-- Demo data for the reusable Check workflow (migration 0006): a Homework
+-- Unit whose Exercises each carry their own answer key and scoring criteria,
+-- so "Check Student Exercise → Use Homework Unit" has something to select
+-- immediately. Teaching Materials are seeded as catalog rows with no
+-- uploaded file (storage_path null) — enough to show file counts in the UI
+-- without needing real files pushed into Storage by this script.
+-- ============================================================================
+
+do $$
+declare
+  v_owner_id uuid;
+  v_unit_id uuid;
+  v_ex1_id uuid;
+  v_ex2_id uuid;
+begin
+  select id into v_owner_id from auth.users where email = 'techjournal.team@gmail.com';
+  if v_owner_id is null then
+    raise exception 'No auth.users row for that email — sign up at /login first, then edit the email at the top of this file.';
+  end if;
+
+  insert into public.homework_units (owner_id, name, subject, grade)
+  values (v_owner_id, 'เศษส่วน', 'คณิตศาสตร์', 'ม.2')
+  returning id into v_unit_id;
+
+  insert into public.homework_unit_files (homework_unit_id, owner_id, group_type, file_name, storage_path, file_kind)
+  values
+    (v_unit_id, v_owner_id, 'material', 'เศษส่วน บทที่ 1.pdf', null, 'pdf'),
+    (v_unit_id, v_owner_id, 'material', 'ตัวอย่างโจทย์เศษส่วน.pdf', null, 'pdf');
+
+  insert into public.exercises (homework_unit_id, owner_id, title, description, scoring_criteria)
+  values (
+    v_unit_id, v_owner_id, 'การบวกเศษส่วน', 'โจทย์บวกเศษส่วนที่มีตัวส่วนต่างกัน 5 ข้อ',
+    '2 คะแนน ถ้าตอบถูกและแสดงวิธีทำครบ
+1 คะแนน ถ้าวิธีทำถูกแต่คำนวณผิด
+0 คะแนน ถ้าวิธีทำผิด'
+  )
+  returning id into v_ex1_id;
+
+  insert into public.answer_keys (exercise_id, owner_id, answer_text)
+  values (
+    v_ex1_id, v_owner_id,
+    'ข้อ 1: 5/6
+ข้อ 2: 1 1/4
+ข้อ 3: 7/10
+ข้อ 4: 2/3
+ข้อ 5: 11/12'
+  );
+
+  insert into public.exercises (homework_unit_id, owner_id, title, description, scoring_criteria)
+  values (
+    v_unit_id, v_owner_id, 'การลบเศษส่วน', 'โจทย์ลบเศษส่วนที่มีตัวส่วนต่างกัน 5 ข้อ',
+    '2 คะแนน ถ้าตอบถูกและแสดงวิธีทำครบ
+1 คะแนน ถ้าวิธีทำถูกแต่คำนวณผิด
+0 คะแนน ถ้าวิธีทำผิด'
+  )
+  returning id into v_ex2_id;
+
+  insert into public.answer_keys (exercise_id, owner_id, answer_text)
+  values (
+    v_ex2_id, v_owner_id,
+    'ข้อ 1: 1/6
+ข้อ 2: 3/8
+ข้อ 3: 5/12
+ข้อ 4: 1/4
+ข้อ 5: 2/9'
+  );
+
+  raise notice 'Seeded Homework Unit % (เศษส่วน) with 2 exercises for owner %', v_unit_id, v_owner_id;
+end $$;
