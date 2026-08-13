@@ -5,24 +5,11 @@ import { Card } from "@/components/ui/Card";
 export function ClassroomSidePanel({
   classroom,
   onShowScores,
-  onGenerateExercises,
-  onGeneratePlan,
-  onGenerateTechnique,
 }: {
   classroom: Classroom;
   onShowScores: () => void;
-  onGenerateExercises: () => void;
-  onGeneratePlan: () => void;
-  onGenerateTechnique: () => void;
 }) {
   const insight = getClassroomInsight(classroom.id);
-
-  const quickTools = [
-    { label: "สร้างแบบฝึกหัด", bg: "rgba(109,151,115,0.12)", onClick: onGenerateExercises },
-    { label: "สร้างแผนการสอน", bg: "rgba(216,183,95,0.18)", onClick: onGeneratePlan },
-    { label: "วิเคราะห์นักเรียน", bg: "rgba(168,198,134,0.25)", onClick: () => onShowScores() },
-    { label: "สร้างกิจกรรม", bg: "rgba(187,107,83,0.15)", onClick: onGenerateTechnique },
-  ];
 
   const classroomTasks = [
     { title: "ตรวจแบบฝึกหัด", detail: `${classroom.exercises.inProgress} ชุดกำลังดำเนินการ`, count: classroom.exercises.inProgress },
@@ -56,18 +43,13 @@ export function ClassroomSidePanel({
 
       <Card className="p-5">
         <h3 className="mb-3 text-[13px] font-bold text-ink">เครื่องมือด่วน</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {quickTools.map((tool) => (
-            <button
-              key={tool.label}
-              onClick={tool.onClick}
-              className="rounded-2xl p-3 text-center"
-              style={{ background: tool.bg }}
-            >
-              <div className="text-[11px] font-semibold text-ink">{tool.label}</div>
-            </button>
-          ))}
-        </div>
+        <button
+          onClick={onShowScores}
+          className="w-full rounded-2xl p-3 text-center"
+          style={{ background: "rgba(168,198,134,0.25)" }}
+        >
+          <div className="text-[11px] font-semibold text-ink">วิเคราะห์นักเรียน</div>
+        </button>
       </Card>
 
       <Card className="p-5">

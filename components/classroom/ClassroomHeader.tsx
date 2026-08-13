@@ -1,14 +1,6 @@
 import type { Classroom } from "@/lib/types";
 
-export function ClassroomHeader({
-  classroom,
-  onGenerateExercises,
-  onGeneratePlan,
-}: {
-  classroom: Classroom;
-  onGenerateExercises: () => void;
-  onGeneratePlan: () => void;
-}) {
+export function ClassroomHeader({ classroom }: { classroom: Classroom }) {
   return (
     <div className="mb-6 flex flex-wrap items-start justify-between gap-5">
       <div className="flex items-center gap-4">
@@ -35,20 +27,6 @@ export function ClassroomHeader({
             </span>
           </div>
         </div>
-      </div>
-      <div className="flex flex-wrap gap-2.5">
-        <button
-          onClick={onGenerateExercises}
-          className="flex items-center gap-1.5 rounded-2xl bg-primary px-5 py-3 text-[13px] font-bold text-card"
-        >
-          <span className="text-sm leading-none">+</span> สร้างแบบฝึกหัด
-        </button>
-        <button
-          onClick={onGeneratePlan}
-          className="flex items-center gap-1.5 rounded-2xl bg-gold px-5 py-3 text-[13px] font-bold text-ink"
-        >
-          ✦ สร้างแผนการสอนด้วย AI
-        </button>
       </div>
     </div>
   );

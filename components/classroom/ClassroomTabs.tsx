@@ -1,12 +1,9 @@
-export type ClassroomTabKey = "overview" | "students" | "exercises" | "scores" | "plans" | "activities";
+export type ClassroomTabKey = "overview" | "students" | "scores";
 
 const TABS: { key: ClassroomTabKey; label: string }[] = [
   { key: "overview", label: "ภาพรวม" },
   { key: "students", label: "นักเรียน" },
-  { key: "exercises", label: "แบบฝึกหัด" },
   { key: "scores", label: "คะแนน & วิเคราะห์ผล" },
-  { key: "plans", label: "แผนการสอน" },
-  { key: "activities", label: "กิจกรรม" },
 ];
 
 export function ClassroomTabs({

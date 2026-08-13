@@ -54,12 +54,6 @@ export const initialClassrooms: Classroom[] = [
       { name: "กิตติภพ แสงทอง", pct: 94.7, rank: 2, badgeBg: "#A8C686" },
       { name: "ปัณวรรณ ศรีสุข", pct: 93.8, rank: 3, badgeBg: "#6D9773" },
     ],
-    latestExercises: [
-      { name: "แบบฝึกหัด เรขาคณิต", unit: "เรขาคณิต", due: "10 พ.ค. 2567", submitted: 40, total: 42, avgScore: "86.9%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด การแยกตัวประกอบ", unit: "การแยกตัวประกอบ", due: "3 พ.ค. 2567", submitted: 42, total: 42, avgScore: "80.7%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด พหุนาม", unit: "พหุนาม", due: "26 เม.ย. 2567", submitted: 41, total: 42, avgScore: "88.2%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด สมการเชิงเส้น (ชุด 2)", unit: "สมการเชิงเส้น", due: "17 พ.ค. 2567", submitted: 28, total: 42, avgScore: "-", status: "in_progress", statusLabel: "กำลังดำเนินการ", statusColor: "#a8823a", statusBg: "rgba(216,183,95,0.22)" },
-    ],
     problems: ["เรียนไม่ทันเพื่อน", "เข้าสังคมไม่ได้"],
     students: [
       { id: "s1", name: "ณัฐวุฒิ สินธุ์เจริญ", studentId: "44821", seatNo: 1, gender: "M", problems: ["เรียนไม่ทันเพื่อน"], homework: { status: "graded", hasFile: true, hasAnswer: true, confirmed: true, score: 78, strengths: ["เข้าใจแนวคิดหลักของบทเรียนได้ดี", "ตอบคำถามเชิงคำนวณได้ถูกต้อง"], weaknesses: ["สรุปใจความสำคัญยังไม่ครบถ้วน", "ใช้เวลาทำโจทย์นานกว่าเพื่อน"], suggestions: ["ให้ฝึกสรุปบทเรียนด้วยแผนภาพก่อนเริ่มทำโจทย์", "แบ่งโจทย์เป็นชุดย่อยเพื่อลดความกดดันเรื่องเวลา"] }, history: [{ name: "พหุนาม", date: "26 เม.ย.", score: 72 }, { name: "การแยกตัวประกอบ", date: "3 พ.ค.", score: 75 }, { name: "เรขาคณิต", date: "10 พ.ค.", score: 78 }] },
@@ -103,11 +97,6 @@ export const initialClassrooms: Classroom[] = [
       { name: "ศุภกร มั่นคง", pct: 90.4, rank: 2, badgeBg: "#A8C686" },
       { name: "วรินทร ทองแท้", pct: 88.9, rank: 3, badgeBg: "#6D9773" },
     ],
-    latestExercises: [
-      { name: "แบบฝึกหัด เรขาคณิต", unit: "เรขาคณิต", due: "10 พ.ค. 2567", submitted: 36, total: 39, avgScore: "78.3%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด การแยกตัวประกอบ", unit: "การแยกตัวประกอบ", due: "3 พ.ค. 2567", submitted: 39, total: 39, avgScore: "76.4%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด พหุนาม (ชุด 2)", unit: "พหุนาม", due: "20 พ.ค. 2567", submitted: 18, total: 39, avgScore: "-", status: "in_progress", statusLabel: "กำลังดำเนินการ", statusColor: "#a8823a", statusBg: "rgba(216,183,95,0.22)" },
-    ],
     problems: ["ขาดสมาธิ/วอกแวกง่าย"],
     students: [
       { id: "s9", name: "ปิยะดา รุ่งเรือง", studentId: "44901", seatNo: 1, gender: "F", problems: [], homework: { status: "graded", hasFile: true, hasAnswer: true, confirmed: true, score: 92, strengths: ["วิเคราะห์โจทย์เป็นระบบ"], weaknesses: ["ทำโจทย์ยากใช้เวลานาน"], suggestions: ["ฝึกโจทย์จับเวลาเพิ่มความคล่องตัว"] }, history: [{ name: "การแยกตัวประกอบ", date: "3 พ.ค.", score: 86 }, { name: "เรขาคณิต", date: "10 พ.ค.", score: 92 }] },
@@ -147,11 +136,6 @@ export const initialClassrooms: Classroom[] = [
       { name: "พีรพัฒน์ ยิ่งยง", pct: 86.5, rank: 2, badgeBg: "#A8C686" },
       { name: "ชญานิษฐ์ แก้วมณี", pct: 84.1, rank: 3, badgeBg: "#6D9773" },
     ],
-    latestExercises: [
-      { name: "แบบฝึกหัด พหุนาม", unit: "พหุนาม", due: "10 พ.ค. 2567", submitted: 34, total: 40, avgScore: "72.1%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด ร้อยละ", unit: "ร้อยละ", due: "3 พ.ค. 2567", submitted: 40, total: 40, avgScore: "71.9%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด อัตราส่วน (ชุด 2)", unit: "อัตราส่วน", due: "18 พ.ค. 2567", submitted: 15, total: 40, avgScore: "-", status: "in_progress", statusLabel: "กำลังดำเนินการ", statusColor: "#a8823a", statusBg: "rgba(216,183,95,0.22)" },
-    ],
     problems: ["ปัญหาด้านการอ่าน-เขียน", "ขาดแรงจูงใจในการเรียน"],
     students: [
       { id: "s13", name: "อรวี ศรีสมบัติ", studentId: "45001", seatNo: 1, gender: "F", problems: [], homework: { status: "graded", hasFile: true, hasAnswer: true, confirmed: true, score: 89, strengths: ["เข้าใจภาพรวมของบทเรียนดี"], weaknesses: ["คำนวณผิดพลาดเล็กน้อยจากความรีบ"], suggestions: ["ฝึกตรวจทานคำตอบก่อนส่งทุกครั้ง"] }, history: [{ name: "ร้อยละ", date: "3 พ.ค.", score: 84 }, { name: "พหุนาม", date: "10 พ.ค.", score: 89 }] },
@@ -190,11 +174,6 @@ export const initialClassrooms: Classroom[] = [
       { name: "นภสร แจ่มใส", pct: 87.6, rank: 1, badgeBg: "#D8B75F" },
       { name: "ธาดา วงศ์สุข", pct: 85.0, rank: 2, badgeBg: "#A8C686" },
       { name: "กัญญาณัฐ ทิพย์เนตร", pct: 83.3, rank: 3, badgeBg: "#6D9773" },
-    ],
-    latestExercises: [
-      { name: "แบบฝึกหัด พหุนาม", unit: "พหุนาม", due: "10 พ.ค. 2567", submitted: 30, total: 38, avgScore: "71.4%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด ร้อยละ", unit: "ร้อยละ", due: "3 พ.ค. 2567", submitted: 38, total: 38, avgScore: "70.5%", status: "graded", statusLabel: "ตรวจเสร็จสิ้น", statusColor: "#5b8060", statusBg: "rgba(109,151,115,0.15)" },
-      { name: "แบบฝึกหัด อัตราส่วน (ชุด 2)", unit: "อัตราส่วน", due: "22 พ.ค. 2567", submitted: 9, total: 38, avgScore: "-", status: "in_progress", statusLabel: "กำลังดำเนินการ", statusColor: "#a8823a", statusBg: "rgba(216,183,95,0.22)" },
     ],
     problems: ["เรียนไม่ทันเพื่อน", "มีข้อบกพร่องด้านการเรียนรู้ (LD)"],
     students: [

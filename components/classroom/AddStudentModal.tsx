@@ -19,17 +19,26 @@ export function AddStudentModal({
   const [seatNo, setSeatNo] = useState(String(nextSeatNo));
   const [gender, setGender] = useState<"M" | "F">("M");
 
-  const canSubmit = name.trim() !== "" && studentId.trim() !== "" && seatNo.trim() !== "";
+  const canSubmit = studentId.trim() !== "" && seatNo.trim() !== "";
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!canSubmit) return;
-    addStudent(classroomId, {
-      name: name.trim(),
-      studentId: studentId.trim(),
-      seatNo: Number(seatNo) || nextSeatNo,
-      gender,
-    });
-    onClose();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await addStudent(classroomId, {
+        name: name.trim() || `นักเรียน ${studentId.trim()}`,
+        studentId: studentId.trim(),
+        seatNo: Number(seatNo) || nextSeatNo,
+        gender,
+      });
+      onClose();
+    } catch {
+      setError("เพิ่มนักเรียนไม่สำเร็จ กรุณาลองใหม่");
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -41,7 +50,7 @@ export function AddStudentModal({
 
         <h2 className="mb-6 text-2xl font-semibold text-ink">เพิ่มนักเรียน</h2>
 
-        <label className="mb-2 block text-xs text-ink/55">ชื่อ-นามสกุล</label>
+        <label className="mb-2 block text-xs text-ink/55">ชื่อ-นามสกุล (ไม่บังคับ)</label>
         <input
           type="text"
           value={name}
@@ -97,12 +106,13 @@ export function AddStudentModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={!canSubmit}
+            disabled={!canSubmit || submitting}
             className="rounded-full bg-primary px-6 py-2.5 text-[13px] font-bold text-card disabled:opacity-40"
           >
-            เพิ่มนักเรียน
+            {submitting ? "กำลังเพิ่ม..." : "เพิ่มนักเรียน"}
           </button>
         </div>
+        {error && <p className="mt-3 text-[12px] text-[#BB6B53]">{error}</p>}
       </div>
     </div>
   );

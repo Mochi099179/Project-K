@@ -3,13 +3,13 @@
 import { useAppData } from "@/lib/store";
 
 export function Topbar() {
-  const { notifications } = useAppData();
+  const { notifications, teacherName } = useAppData();
 
   return (
     <div className="sticky top-0 z-30 flex items-center justify-between gap-6 border-b border-border bg-cream/90 px-6 py-5.5 backdrop-blur-md sm:px-10">
       <div>
         <h1 className="text-[1.4rem] font-bold tracking-tight text-ink sm:text-[1.6rem]">
-          สวัสดีค่ะ ครูจิราภรณ์ 👋
+          สวัสดีค่ะ {teacherName || "ครูผู้สอน"} 👋
         </h1>
         <p className="mt-1 text-[13px] text-ink/55">ยินดีต้อนรับเข้าสู่แดชบอร์ดของคุณ</p>
       </div>

@@ -1,61 +1,173 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
-import type { Classroom, PlanRow, Student, TechniqueResult } from "./types";
-import { initialClassrooms, initialNotifications, initialTasks } from "./mock-data";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type {
+  Check,
+  Classroom,
+  FileKind,
+  HomeworkUnit,
+  QuestionResult,
+  Student,
+} from "./types";
+import { computeOverallScore } from "./types";
+import { getSupabaseBrowserClient } from "./supabase/client";
+import * as classroomsApi from "./data/classrooms";
+import * as homeworkUnitsApi from "./data/homework-units";
+import * as submissionsApi from "./data/submissions";
+import type { ReadImageResult } from "./files";
 
-type CreateClassroomInput = {
-  name: string;
-  grade: string;
-  problems: string[];
+type NewStudentInput = { name?: string; studentId: string; seatNo?: number; gender?: "M" | "F" };
+type CreateClassroomInput = { name: string; grade: string; problems: string[]; students?: NewStudentInput[] };
+type AddStudentInput = { name: string; studentId: string; seatNo: number; gender: "M" | "F" };
+
+type StartCheckInput = {
+  studentLabel: string;
+  topic?: string;
+  teachingMaterialsText?: string;
+  answerKeyText?: string;
+  answerKeyImage?: ReadImageResult | null;
+  exerciseImages: ReadImageResult[];
+  classroomId?: string | null;
+  studentId?: string | null;
+  homeworkUnitId?: string | null;
+  exerciseId?: string | null;
 };
 
-type AddStudentInput = {
-  name: string;
-  studentId: string;
-  seatNo: number;
-  gender: "M" | "F";
+type CreateHomeworkUnitInput = { name: string; subject: string; grade: string };
+
+type CreateExerciseInput = {
+  title: string;
+  description?: string;
+  scoringCriteria?: string;
+  maxScore?: number;
+  exerciseFile?: { file: File; kind: FileKind } | null;
+  answerKeyFile?: { file: File; kind: FileKind } | null;
+  answerKeyText?: string;
 };
 
-type SendToAIInput = {
-  imageBase64: string;
-  mediaType: string;
-  answerKeyText: string;
-};
+// tasks/notifications are cosmetic widgets that were never part of the
+// approved DB schema (see README) — kept as static local data so the
+// existing Topbar notification badge keeps working unchanged.
+const STATIC_NOTIFICATIONS = [
+  { title: "มีงานรอตรวจสอบ", detail: "AI ตรวจแบบฝึกหัดเสร็จแล้ว รอครูยืนยันผล", time: "เมื่อสักครู่" },
+];
 
 type AppDataContextValue = {
+  loading: boolean;
+  teacherName: string;
+  signOut: () => Promise<void>;
+
   classrooms: Classroom[];
-  tasks: typeof initialTasks;
-  notifications: typeof initialNotifications;
+  tasks: never[];
+  notifications: typeof STATIC_NOTIFICATIONS;
   pendingReviewCount: number;
   getClassroom: (id: string) => Classroom | undefined;
   getStudent: (classroomId: string, studentId: string) => Student | undefined;
-  createClassroom: (input: CreateClassroomInput) => string;
-  addStudent: (classroomId: string, input: AddStudentInput) => void;
-  sendToAI: (classroomId: string, studentId: string, input: SendToAIInput) => Promise<void>;
-  confirmGrading: (classroomId: string, studentId: string) => void;
-  addSavedPlan: (classroomId: string, topic: string, rows: PlanRow[]) => void;
-  addSavedTechnique: (classroomId: string, result: TechniqueResult) => void;
+  createClassroom: (input: CreateClassroomInput) => Promise<string>;
+  addStudent: (classroomId: string, input: AddStudentInput) => Promise<string>;
   showCreateModal: boolean;
-  openCreateModal: () => void;
+  openCreateModal: (onDone?: (classroomId: string) => void) => void;
   closeCreateModal: () => void;
+
+  checks: Check[];
+  getCheck: (id: string) => Check | undefined;
+  getChecksForStudent: (classroomId: string, studentId: string) => Check[];
+  getChecksForClassroom: (classroomId: string) => Check[];
+  getRecentChecks: (limit?: number) => Check[];
+  startCheck: (input: StartCheckInput) => Promise<string>;
+  correctQuestion: (checkId: string, questionId: string, correction: QuestionResult) => Promise<void>;
+  markReviewed: (checkId: string) => Promise<void>;
+  saveCheckToProfile: (checkId: string, classroomId: string, studentId: string) => Promise<void>;
+
+  homeworkUnits: HomeworkUnit[];
+  getHomeworkUnit: (id: string) => HomeworkUnit | undefined;
+  createHomeworkUnit: (input: CreateHomeworkUnitInput) => Promise<string>;
+  addFileToUnit: (unitId: string, file: File, kind: FileKind) => Promise<void>;
+  createExercise: (homeworkUnitId: string, input: CreateExerciseInput) => Promise<string>;
+  deleteExercise: (homeworkUnitId: string, exerciseId: string) => Promise<void>;
+  deleteHomeworkUnit: (unitId: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
 export function AppDataProvider({ children }: { children: React.ReactNode }) {
-  const [classrooms, setClassrooms] = useState<Classroom[]>(initialClassrooms);
-  const [tasks] = useState(initialTasks);
-  const [notifications] = useState(initialNotifications);
+  const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState("");
+
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [homeworkUnits, setHomeworkUnits] = useState<HomeworkUnit[]>([]);
+  const [checks, setChecks] = useState<Check[]>([]);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createModalCallback, setCreateModalCallback] = useState<((id: string) => void) | null>(null);
 
-  const openCreateModal = useCallback(() => setShowCreateModal(true), []);
-  const closeCreateModal = useCallback(() => setShowCreateModal(false), []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabaseBrowserClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-  const getClassroom = useCallback(
-    (id: string) => classrooms.find((c) => c.id === id),
-    [classrooms]
-  );
+      if (!user) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+      if (cancelled) return;
+      setUserId(user.id);
+
+      // Promise.allSettled (not .all): one query failing — e.g. a migration
+      // that hasn't been applied yet — must not leave the whole app stuck on
+      // the loading screen forever. Every other section still loads normally.
+      const [profileRes, classroomRes, unitRes, checkRes] = await Promise.allSettled([
+        supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
+        classroomsApi.listClassrooms(supabase),
+        homeworkUnitsApi.listHomeworkUnits(supabase),
+        submissionsApi.listRecentSubmissions(supabase, 500),
+      ]);
+
+      if (cancelled) return;
+
+      if (profileRes.status === "fulfilled") setTeacherName(profileRes.value.data?.display_name || "ครูผู้สอน");
+      else console.error("Failed to load profile:", profileRes.reason);
+
+      if (classroomRes.status === "fulfilled") setClassrooms(classroomRes.value);
+      else console.error("Failed to load classrooms:", classroomRes.reason);
+
+      if (unitRes.status === "fulfilled") setHomeworkUnits(unitRes.value);
+      else console.error("Failed to load homework units:", unitRes.reason);
+
+      if (checkRes.status === "fulfilled") setChecks(checkRes.value);
+      else console.error("Failed to load checks:", checkRes.reason);
+
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    await supabase.auth.signOut();
+    // Hard navigation (not router.push) is intentional here: it guarantees
+    // every piece of in-memory app state (classrooms/checks/etc.) is dropped
+    // on sign-out rather than briefly lingering from the previous session.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = "/login";
+  }, []);
+
+  const openCreateModal = useCallback((onDone?: (classroomId: string) => void) => {
+    setCreateModalCallback(() => onDone ?? null);
+    setShowCreateModal(true);
+  }, []);
+  const closeCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+    setCreateModalCallback(null);
+  }, []);
+
+  const getClassroom = useCallback((id: string) => classrooms.find((c) => c.id === id), [classrooms]);
 
   const getStudent = useCallback(
     (classroomId: string, studentId: string) => {
@@ -65,173 +177,288 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     [classrooms]
   );
 
-  const updateStudentHomework = useCallback(
-    (classroomId: string, studentId: string, updater: (hw: Student["homework"]) => Student["homework"]) => {
-      setClassrooms((prev) =>
-        prev.map((c) =>
-          c.id !== classroomId
-            ? c
-            : {
-                ...c,
-                students: c.students.map((st) =>
-                  st.id === studentId ? { ...st, homework: updater(st.homework) } : st
-                ),
-              }
-        )
-      );
+  const createClassroom = useCallback(
+    async (input: CreateClassroomInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await classroomsApi.createClassroom(supabase, userId, input);
+      const fresh = await classroomsApi.getClassroom(supabase, id);
+      if (fresh) setClassrooms((prev) => [fresh, ...prev]);
+      setShowCreateModal(false);
+      if (createModalCallback) {
+        createModalCallback(id);
+        setCreateModalCallback(null);
+      }
+      return id;
     },
-    []
+    [userId, createModalCallback]
   );
 
-  const createClassroom = useCallback((input: CreateClassroomInput) => {
-    const id = "c" + Date.now();
-    const newClassroom: Classroom = {
-      id,
-      name: input.name || "ห้องเรียนใหม่",
-      subject: "คณิตศาสตร์",
-      grade: input.grade || "-",
-      term: "ภาคเรียนที่ 1/2567",
-      teacher: "ครูจิราภรณ์",
-      exercises: { total: 0, completed: 0, inProgress: 0 },
-      avgScore: 0,
-      avgDelta: 0,
-      riskCount: 0,
-      trend: [],
-      distribution: [],
-      groups: { excellent: 0, good: 0, developing: 0, support: 0 },
-      subjectScores: [],
-      topStudents: [],
-      latestExercises: [],
-      problems: input.problems,
-      students: [],
-    };
-    setClassrooms((prev) => [...prev, newClassroom]);
-    setShowCreateModal(false);
+  const addStudent = useCallback(async (classroomId: string, input: AddStudentInput): Promise<string> => {
+    const supabase = getSupabaseBrowserClient();
+    const id = await classroomsApi.addStudent(supabase, classroomId, input);
+    const fresh = await classroomsApi.getClassroom(supabase, classroomId);
+    if (fresh) setClassrooms((prev) => prev.map((c) => (c.id === classroomId ? fresh : c)));
     return id;
   }, []);
 
-  const addStudent = useCallback((classroomId: string, input: AddStudentInput) => {
-    const newStudent: Student = {
-      id: "s" + Date.now(),
-      name: input.name,
-      studentId: input.studentId,
-      seatNo: input.seatNo,
-      gender: input.gender,
-      problems: [],
-      homework: { status: "none", hasFile: false, hasAnswer: false, confirmed: false },
-    };
-    setClassrooms((prev) =>
-      prev.map((c) => (c.id !== classroomId ? c : { ...c, students: [...c.students, newStudent] }))
-    );
-  }, []);
+  // ---------------- Checks ----------------
 
-  const sendToAI = useCallback(
-    async (classroomId: string, studentId: string, input: SendToAIInput) => {
-      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, status: "grading", error: undefined }));
-      try {
-        const res = await fetch("/api/analyze-homework", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        });
-        const body = await res.json();
-        if (!res.ok) {
-          throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+  const getCheck = useCallback((id: string) => checks.find((c) => c.id === id), [checks]);
+
+  const getChecksForStudent = useCallback(
+    (classroomId: string, studentId: string) =>
+      checks
+        .filter((c) => c.classroomId === classroomId && c.studentId === studentId)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    [checks]
+  );
+
+  const getChecksForClassroom = useCallback(
+    (classroomId: string) => checks.filter((c) => c.classroomId === classroomId),
+    [checks]
+  );
+
+  const getRecentChecks = useCallback(
+    (limit = 5) => [...checks].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, limit),
+    [checks]
+  );
+
+  const startCheck = useCallback(
+    (input: StartCheckInput): Promise<string> => {
+      const id = crypto.randomUUID();
+      const placeholder: Check = {
+        id,
+        createdAt: new Date().toISOString(),
+        status: "processing",
+        studentLabel: input.studentLabel,
+        topic: input.topic,
+        exerciseImages: input.exerciseImages.map((i) => i.dataUrl),
+        questions: [],
+        overallScore: 0,
+        homeworkUnitId: input.homeworkUnitId ?? null,
+        exerciseId: input.exerciseId ?? null,
+        classroomId: input.classroomId ?? null,
+        studentId: input.studentId ?? null,
+        savedToProfile: null,
+      };
+      setChecks((prev) => [placeholder, ...prev]);
+
+      void (async () => {
+        try {
+          if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+          const supabase = getSupabaseBrowserClient();
+
+          const exerciseFileRefs = [];
+          for (const img of input.exerciseImages) {
+            exerciseFileRefs.push(await submissionsApi.uploadSubmissionFile(supabase, userId, id, img.file));
+          }
+          const answerKeyFileRef = input.answerKeyImage
+            ? await submissionsApi.uploadSubmissionFile(supabase, userId, id, input.answerKeyImage.file)
+            : null;
+
+          await submissionsApi.createSubmissionShell(supabase, userId, {
+            id,
+            studentLabel: input.studentLabel,
+            topic: input.topic,
+            exerciseFiles: exerciseFileRefs,
+            answerKeyFile: answerKeyFileRef,
+            answerKeyText: input.answerKeyText,
+            teachingMaterialsText: input.teachingMaterialsText,
+            classroomId: input.classroomId,
+            studentId: input.studentId,
+            homeworkUnitId: input.homeworkUnitId,
+            exerciseId: input.exerciseId,
+          });
+
+          const res = await fetch("/api/process-check", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ submissionId: id }),
+          });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+
+          const refreshed = await submissionsApi.getSubmission(supabase, id);
+          if (refreshed) {
+            setChecks((prev) => [refreshed, ...prev.filter((c) => c.id !== id)]);
+          }
+        } catch (err) {
+          setChecks((prev) =>
+            prev.map((c) =>
+              c.id === id
+                ? { ...c, status: "failed", errorMessage: err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการตรวจ" }
+                : c
+            )
+          );
         }
-        updateStudentHomework(classroomId, studentId, (hw) => ({
-          ...hw,
-          status: "graded",
-          confirmed: false,
-          hasFile: true,
-          hasAnswer: true,
-          score: body.score,
-          strengths: body.strengths,
-          weaknesses: body.weaknesses,
-          suggestions: body.suggestions,
-          transcription: body.transcription,
-        }));
-      } catch (err) {
-        updateStudentHomework(classroomId, studentId, (hw) => ({
-          ...hw,
-          status: "none",
-          error: err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการตรวจ",
-        }));
-      }
+      })();
+
+      return Promise.resolve(id);
     },
-    [updateStudentHomework]
+    [userId]
   );
 
-  const confirmGrading = useCallback(
-    (classroomId: string, studentId: string) => {
-      updateStudentHomework(classroomId, studentId, (hw) => ({ ...hw, confirmed: true }));
+  const correctQuestion = useCallback(
+    async (checkId: string, questionId: string, correction: QuestionResult) => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const evaluationId = await submissionsApi.getEvaluationIdForQuestion(supabase, questionId);
+      if (!evaluationId) throw new Error("ไม่พบข้อมูลการตรวจของข้อนี้");
+      await submissionsApi.upsertTeacherCorrection(supabase, evaluationId, userId, correction);
+
+      setChecks((prev) =>
+        prev.map((c) => {
+          if (c.id !== checkId) return c;
+          const questions = c.questions.map((q) => (q.id === questionId ? { ...q, teacherCorrected: correction } : q));
+          return { ...c, questions, overallScore: computeOverallScore(questions) };
+        })
+      );
     },
-    [updateStudentHomework]
+    [userId]
   );
 
-  const addSavedPlan = useCallback((classroomId: string, topic: string, rows: PlanRow[]) => {
-    setClassrooms((prev) =>
+  const markReviewed = useCallback(async (checkId: string) => {
+    const supabase = getSupabaseBrowserClient();
+    await submissionsApi.markSubmissionReviewed(supabase, checkId);
+    setChecks((prev) => prev.map((c) => (c.id === checkId ? { ...c, status: "reviewed" } : c)));
+  }, []);
+
+  const saveCheckToProfile = useCallback(async (checkId: string, classroomId: string, studentId: string) => {
+    const supabase = getSupabaseBrowserClient();
+    await submissionsApi.linkSubmissionToProfile(supabase, checkId, classroomId, studentId);
+    setChecks((prev) =>
       prev.map((c) =>
-        c.id !== classroomId
-          ? c
-          : { ...c, savedPlans: [...(c.savedPlans || []), { topic: topic || "บทเรียนนี้", rows }] }
+        c.id === checkId
+          ? {
+              ...c,
+              classroomId,
+              studentId,
+              status: "reviewed",
+              savedToProfile: { classroomId, studentId, savedAt: new Date().toISOString() },
+            }
+          : c
       )
     );
   }, []);
 
-  const addSavedTechnique = useCallback((classroomId: string, result: TechniqueResult) => {
-    setClassrooms((prev) =>
-      prev.map((c) =>
-        c.id !== classroomId ? c : { ...c, savedTechniques: [...(c.savedTechniques || []), result] }
-      )
+  // ---------------- Homework Units ----------------
+
+  const getHomeworkUnit = useCallback((id: string) => homeworkUnits.find((u) => u.id === id), [homeworkUnits]);
+
+  const createHomeworkUnit = useCallback(
+    async (input: CreateHomeworkUnitInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await homeworkUnitsApi.createHomeworkUnit(supabase, userId, input);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, id);
+      if (fresh) setHomeworkUnits((prev) => [fresh, ...prev]);
+      return id;
+    },
+    [userId]
+  );
+
+  const addFileToUnit = useCallback(
+    async (unitId: string, file: File, kind: FileKind) => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, "material", file, kind);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, unitId);
+      if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === unitId ? fresh : u)));
+    },
+    [userId]
+  );
+
+  const createExercise = useCallback(
+    async (homeworkUnitId: string, input: CreateExerciseInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await homeworkUnitsApi.createExercise(supabase, userId, homeworkUnitId, input);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, homeworkUnitId);
+      if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === homeworkUnitId ? fresh : u)));
+      return id;
+    },
+    [userId]
+  );
+
+  const deleteExercise = useCallback(async (homeworkUnitId: string, exerciseId: string): Promise<void> => {
+    const supabase = getSupabaseBrowserClient();
+    await homeworkUnitsApi.deleteExercise(supabase, exerciseId);
+    setHomeworkUnits((prev) =>
+      prev.map((u) => (u.id === homeworkUnitId ? { ...u, exercises: u.exercises.filter((e) => e.id !== exerciseId) } : u))
     );
   }, []);
 
-  const pendingReviewCount = useMemo(
-    () =>
-      classrooms.reduce(
-        (sum, c) =>
-          sum +
-          c.students.filter((st) => st.homework.status === "graded" && !st.homework.confirmed).length +
-          c.exercises.inProgress,
-        0
-      ),
-    [classrooms]
-  );
+  const deleteHomeworkUnit = useCallback(async (unitId: string): Promise<void> => {
+    const supabase = getSupabaseBrowserClient();
+    await homeworkUnitsApi.deleteHomeworkUnit(supabase, unitId);
+    setHomeworkUnits((prev) => prev.filter((u) => u.id !== unitId));
+  }, []);
+
+  const pendingReviewCount = useMemo(() => checks.filter((c) => c.status === "needs_review").length, [checks]);
 
   const value = useMemo<AppDataContextValue>(
     () => ({
+      loading,
+      teacherName,
+      signOut,
       classrooms,
-      tasks,
-      notifications,
+      tasks: [],
+      notifications: STATIC_NOTIFICATIONS,
       pendingReviewCount,
       getClassroom,
       getStudent,
       createClassroom,
       addStudent,
-      sendToAI,
-      confirmGrading,
-      addSavedPlan,
-      addSavedTechnique,
       showCreateModal,
       openCreateModal,
       closeCreateModal,
+      checks,
+      getCheck,
+      getChecksForStudent,
+      getChecksForClassroom,
+      getRecentChecks,
+      startCheck,
+      correctQuestion,
+      markReviewed,
+      saveCheckToProfile,
+      homeworkUnits,
+      getHomeworkUnit,
+      createHomeworkUnit,
+      addFileToUnit,
+      createExercise,
+      deleteExercise,
+      deleteHomeworkUnit,
     }),
     [
+      loading,
+      teacherName,
+      signOut,
       classrooms,
-      tasks,
-      notifications,
       pendingReviewCount,
       getClassroom,
       getStudent,
       createClassroom,
       addStudent,
-      sendToAI,
-      confirmGrading,
-      addSavedPlan,
-      addSavedTechnique,
       showCreateModal,
       openCreateModal,
       closeCreateModal,
+      checks,
+      getCheck,
+      getChecksForStudent,
+      getChecksForClassroom,
+      getRecentChecks,
+      startCheck,
+      correctQuestion,
+      markReviewed,
+      saveCheckToProfile,
+      homeworkUnits,
+      getHomeworkUnit,
+      createHomeworkUnit,
+      addFileToUnit,
+      createExercise,
+      deleteExercise,
+      deleteHomeworkUnit,
     ]
   );
 

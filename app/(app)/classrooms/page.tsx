@@ -16,7 +16,7 @@ export default function ClassroomsPage() {
         <div className="mb-6 flex items-center justify-between">
           <h1 className="text-2xl font-bold text-ink">ห้องเรียนทั้งหมด</h1>
           <button
-            onClick={openCreateModal}
+            onClick={() => openCreateModal()}
             className="flex items-center gap-1.5 rounded-2xl bg-primary px-5 py-3 text-[13px] font-bold text-card"
           >
             <span className="text-base leading-none">+</span> สร้างห้องเรียนใหม่

@@ -5,7 +5,7 @@ import { BreadcrumbBar } from "@/components/layout/BreadcrumbBar";
 import { GeneratePanel } from "@/components/ai/GeneratePanel";
 import { GENERATE_TYPE_LABEL, type GenerateType } from "@/lib/types";
 
-const VALID_TYPES: GenerateType[] = ["materials", "exercises", "plan", "technique"];
+const VALID_TYPES: GenerateType[] = ["materials"];
 
 export default function AiToolPage() {
   const params = useParams<{ type: string }>();
