@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BreadcrumbBar } from "@/components/layout/BreadcrumbBar";
-import { QuickCheckWizard } from "@/components/quickcheck/QuickCheckWizard";
+import { CheckFlowLauncher } from "@/components/quickcheck/CheckFlowLauncher";
 
 function QuickCheckInner() {
   const router = useRouter();
@@ -12,9 +12,9 @@ function QuickCheckInner() {
   const topic = searchParams.get("topic") ?? "";
 
   return (
-    <QuickCheckWizard
+    <CheckFlowLauncher
       presetTopic={topic}
-      presetHomeworkUnitId={unitId}
+      initialHomeworkUnitId={unitId}
       onStarted={(checkId) => router.push(`/checks/${checkId}`)}
     />
   );

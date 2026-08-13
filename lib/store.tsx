@@ -6,18 +6,14 @@ import type {
   Classroom,
   FileKind,
   HomeworkUnit,
-  PlanRow,
   QuestionResult,
-  SavedPlan,
   Student,
-  TechniqueResult,
 } from "./types";
 import { computeOverallScore } from "./types";
 import { getSupabaseBrowserClient } from "./supabase/client";
 import * as classroomsApi from "./data/classrooms";
 import * as homeworkUnitsApi from "./data/homework-units";
 import * as submissionsApi from "./data/submissions";
-import type { HomeworkFileGroup } from "./data/homework-units";
 import type { ReadImageResult } from "./files";
 
 type NewStudentInput = { name?: string; studentId: string; seatNo?: number; gender?: "M" | "F" };
@@ -34,15 +30,19 @@ type StartCheckInput = {
   classroomId?: string | null;
   studentId?: string | null;
   homeworkUnitId?: string | null;
+  exerciseId?: string | null;
 };
 
 type CreateHomeworkUnitInput = { name: string; subject: string; grade: string };
-type HomeworkUnitFileGroup = "exercises" | "answerKeys" | "teachingMaterials";
 
-const GROUP_MAP: Record<HomeworkUnitFileGroup, HomeworkFileGroup> = {
-  exercises: "exercise",
-  answerKeys: "answer_key",
-  teachingMaterials: "material",
+type CreateExerciseInput = {
+  title: string;
+  description?: string;
+  scoringCriteria?: string;
+  maxScore?: number;
+  exerciseFile?: { file: File; kind: FileKind } | null;
+  answerKeyFile?: { file: File; kind: FileKind } | null;
+  answerKeyText?: string;
 };
 
 // tasks/notifications are cosmetic widgets that were never part of the
@@ -65,8 +65,6 @@ type AppDataContextValue = {
   getStudent: (classroomId: string, studentId: string) => Student | undefined;
   createClassroom: (input: CreateClassroomInput) => Promise<string>;
   addStudent: (classroomId: string, input: AddStudentInput) => Promise<string>;
-  addSavedPlan: (classroomId: string, topic: string, rows: PlanRow[]) => void;
-  addSavedTechnique: (classroomId: string, result: TechniqueResult) => void;
   showCreateModal: boolean;
   openCreateModal: (onDone?: (classroomId: string) => void) => void;
   closeCreateModal: () => void;
@@ -84,7 +82,10 @@ type AppDataContextValue = {
   homeworkUnits: HomeworkUnit[];
   getHomeworkUnit: (id: string) => HomeworkUnit | undefined;
   createHomeworkUnit: (input: CreateHomeworkUnitInput) => Promise<string>;
-  addFileToUnit: (unitId: string, group: HomeworkUnitFileGroup, file: File, kind: FileKind) => Promise<void>;
+  addFileToUnit: (unitId: string, file: File, kind: FileKind) => Promise<void>;
+  createExercise: (homeworkUnitId: string, input: CreateExerciseInput) => Promise<string>;
+  deleteExercise: (homeworkUnitId: string, exerciseId: string) => Promise<void>;
+  deleteHomeworkUnit: (unitId: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -97,10 +98,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
   const [homeworkUnits, setHomeworkUnits] = useState<HomeworkUnit[]>([]);
   const [checks, setChecks] = useState<Check[]>([]);
-  // addSavedPlan/addSavedTechnique are deliberately NOT persisted (see README:
-  // "known simplifications" — not part of the approved schema). Kept as local
-  // state merged onto classrooms at read time so GeneratePanel keeps working.
-  const [savedExtras, setSavedExtras] = useState<Record<string, { savedPlans: SavedPlan[]; savedTechniques: TechniqueResult[] }>>({});
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createModalCallback, setCreateModalCallback] = useState<((id: string) => void) | null>(null);
@@ -120,7 +117,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (cancelled) return;
       setUserId(user.id);
 
-      const [profileRes, classroomList, unitList, checkList] = await Promise.all([
+      // Promise.allSettled (not .all): one query failing — e.g. a migration
+      // that hasn't been applied yet — must not leave the whole app stuck on
+      // the loading screen forever. Every other section still loads normally.
+      const [profileRes, classroomRes, unitRes, checkRes] = await Promise.allSettled([
         supabase.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
         classroomsApi.listClassrooms(supabase),
         homeworkUnitsApi.listHomeworkUnits(supabase),
@@ -128,10 +128,19 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       ]);
 
       if (cancelled) return;
-      setTeacherName(profileRes.data?.display_name || "ครูผู้สอน");
-      setClassrooms(classroomList);
-      setHomeworkUnits(unitList);
-      setChecks(checkList);
+
+      if (profileRes.status === "fulfilled") setTeacherName(profileRes.value.data?.display_name || "ครูผู้สอน");
+      else console.error("Failed to load profile:", profileRes.reason);
+
+      if (classroomRes.status === "fulfilled") setClassrooms(classroomRes.value);
+      else console.error("Failed to load classrooms:", classroomRes.reason);
+
+      if (unitRes.status === "fulfilled") setHomeworkUnits(unitRes.value);
+      else console.error("Failed to load homework units:", unitRes.reason);
+
+      if (checkRes.status === "fulfilled") setChecks(checkRes.value);
+      else console.error("Failed to load checks:", checkRes.reason);
+
       setLoading(false);
     })();
     return () => {
@@ -149,16 +158,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     window.location.href = "/login";
   }, []);
 
-  const classroomsWithExtras = useMemo(
-    () =>
-      classrooms.map((c) => ({
-        ...c,
-        savedPlans: savedExtras[c.id]?.savedPlans,
-        savedTechniques: savedExtras[c.id]?.savedTechniques,
-      })),
-    [classrooms, savedExtras]
-  );
-
   const openCreateModal = useCallback((onDone?: (classroomId: string) => void) => {
     setCreateModalCallback(() => onDone ?? null);
     setShowCreateModal(true);
@@ -168,14 +167,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     setCreateModalCallback(null);
   }, []);
 
-  const getClassroom = useCallback((id: string) => classroomsWithExtras.find((c) => c.id === id), [classroomsWithExtras]);
+  const getClassroom = useCallback((id: string) => classrooms.find((c) => c.id === id), [classrooms]);
 
   const getStudent = useCallback(
     (classroomId: string, studentId: string) => {
-      const classroom = classroomsWithExtras.find((c) => c.id === classroomId);
+      const classroom = classrooms.find((c) => c.id === classroomId);
       return classroom?.students.find((s) => s.id === studentId);
     },
-    [classroomsWithExtras]
+    [classrooms]
   );
 
   const createClassroom = useCallback(
@@ -201,26 +200,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const fresh = await classroomsApi.getClassroom(supabase, classroomId);
     if (fresh) setClassrooms((prev) => prev.map((c) => (c.id === classroomId ? fresh : c)));
     return id;
-  }, []);
-
-  const addSavedPlan = useCallback((classroomId: string, topic: string, rows: PlanRow[]) => {
-    setSavedExtras((prev) => ({
-      ...prev,
-      [classroomId]: {
-        savedPlans: [...(prev[classroomId]?.savedPlans ?? []), { topic: topic || "บทเรียนนี้", rows }],
-        savedTechniques: prev[classroomId]?.savedTechniques ?? [],
-      },
-    }));
-  }, []);
-
-  const addSavedTechnique = useCallback((classroomId: string, result: TechniqueResult) => {
-    setSavedExtras((prev) => ({
-      ...prev,
-      [classroomId]: {
-        savedPlans: prev[classroomId]?.savedPlans ?? [],
-        savedTechniques: [...(prev[classroomId]?.savedTechniques ?? []), result],
-      },
-    }));
   }, []);
 
   // ---------------- Checks ----------------
@@ -258,6 +237,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         questions: [],
         overallScore: 0,
         homeworkUnitId: input.homeworkUnitId ?? null,
+        exerciseId: input.exerciseId ?? null,
         classroomId: input.classroomId ?? null,
         studentId: input.studentId ?? null,
         savedToProfile: null,
@@ -288,6 +268,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             classroomId: input.classroomId,
             studentId: input.studentId,
             homeworkUnitId: input.homeworkUnitId,
+            exerciseId: input.exerciseId,
           });
 
           const res = await fetch("/api/process-check", {
@@ -378,15 +359,41 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addFileToUnit = useCallback(
-    async (unitId: string, group: HomeworkUnitFileGroup, file: File, kind: FileKind) => {
+    async (unitId: string, file: File, kind: FileKind) => {
       if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
       const supabase = getSupabaseBrowserClient();
-      await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, GROUP_MAP[group], file, kind);
+      await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, "material", file, kind);
       const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, unitId);
       if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === unitId ? fresh : u)));
     },
     [userId]
   );
+
+  const createExercise = useCallback(
+    async (homeworkUnitId: string, input: CreateExerciseInput): Promise<string> => {
+      if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
+      const supabase = getSupabaseBrowserClient();
+      const id = await homeworkUnitsApi.createExercise(supabase, userId, homeworkUnitId, input);
+      const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, homeworkUnitId);
+      if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === homeworkUnitId ? fresh : u)));
+      return id;
+    },
+    [userId]
+  );
+
+  const deleteExercise = useCallback(async (homeworkUnitId: string, exerciseId: string): Promise<void> => {
+    const supabase = getSupabaseBrowserClient();
+    await homeworkUnitsApi.deleteExercise(supabase, exerciseId);
+    setHomeworkUnits((prev) =>
+      prev.map((u) => (u.id === homeworkUnitId ? { ...u, exercises: u.exercises.filter((e) => e.id !== exerciseId) } : u))
+    );
+  }, []);
+
+  const deleteHomeworkUnit = useCallback(async (unitId: string): Promise<void> => {
+    const supabase = getSupabaseBrowserClient();
+    await homeworkUnitsApi.deleteHomeworkUnit(supabase, unitId);
+    setHomeworkUnits((prev) => prev.filter((u) => u.id !== unitId));
+  }, []);
 
   const pendingReviewCount = useMemo(() => checks.filter((c) => c.status === "needs_review").length, [checks]);
 
@@ -395,7 +402,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       loading,
       teacherName,
       signOut,
-      classrooms: classroomsWithExtras,
+      classrooms,
       tasks: [],
       notifications: STATIC_NOTIFICATIONS,
       pendingReviewCount,
@@ -403,8 +410,6 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getStudent,
       createClassroom,
       addStudent,
-      addSavedPlan,
-      addSavedTechnique,
       showCreateModal,
       openCreateModal,
       closeCreateModal,
@@ -421,19 +426,20 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getHomeworkUnit,
       createHomeworkUnit,
       addFileToUnit,
+      createExercise,
+      deleteExercise,
+      deleteHomeworkUnit,
     }),
     [
       loading,
       teacherName,
       signOut,
-      classroomsWithExtras,
+      classrooms,
       pendingReviewCount,
       getClassroom,
       getStudent,
       createClassroom,
       addStudent,
-      addSavedPlan,
-      addSavedTechnique,
       showCreateModal,
       openCreateModal,
       closeCreateModal,
@@ -450,6 +456,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getHomeworkUnit,
       createHomeworkUnit,
       addFileToUnit,
+      createExercise,
+      deleteExercise,
+      deleteHomeworkUnit,
     ]
   );
 

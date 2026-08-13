@@ -3,7 +3,6 @@ import { Card } from "@/components/ui/Card";
 import { TrendChart } from "@/components/ui/TrendChart";
 import { DonutChart } from "@/components/ui/DonutChart";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { ExerciseTable } from "../ExerciseTable";
 
 const statIcon = {
   students: (
@@ -40,7 +39,7 @@ const groupMeta = [
   { key: "support" as const, label: "กลุ่มเสริม", range: "< 70% · คน", bg: "rgba(187,107,83,0.15)" },
 ];
 
-export function OverviewTab({ classroom, onGenerateExercises }: { classroom: Classroom; onGenerateExercises: () => void }) {
+export function OverviewTab({ classroom }: { classroom: Classroom }) {
   const genderMale = classroom.students.filter((s) => s.gender === "M").length;
   const genderFemale = classroom.students.filter((s) => s.gender === "F").length;
 
@@ -140,19 +139,6 @@ export function OverviewTab({ classroom, onGenerateExercises }: { classroom: Cla
           <div className="mt-3.5 text-right text-[11px] font-semibold text-primary">ดูวิเคราะห์เชิงลึก →</div>
         </Card>
       </div>
-
-      <Card className="p-5.5">
-        <div className="mb-3.5 flex items-center justify-between">
-          <h3 className="text-[13.5px] font-bold text-ink">แบบฝึกหัดล่าสุด</h3>
-          <button
-            onClick={onGenerateExercises}
-            className="rounded-full bg-primary px-3.5 py-2 text-[11.5px] font-bold text-card"
-          >
-            + สร้างแบบฝึกหัดใหม่
-          </button>
-        </div>
-        <ExerciseTable rows={classroom.latestExercises} />
-      </Card>
     </div>
   );
 }

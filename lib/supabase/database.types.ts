@@ -132,6 +132,7 @@ export interface Database {
           student_id: string | null;
           classroom_id: string | null;
           homework_unit_id: string | null;
+          exercise_id: string | null;
           topic: string | null;
           status: SubmissionStatus;
           exercise_files: Json; // { storage_path: string; file_name: string }[]
@@ -151,6 +152,7 @@ export interface Database {
           student_id?: string | null;
           classroom_id?: string | null;
           homework_unit_id?: string | null;
+          exercise_id?: string | null;
           topic?: string | null;
           status?: SubmissionStatus;
           exercise_files?: Json;
@@ -162,6 +164,57 @@ export interface Database {
           saved_to_profile_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["submissions"]["Insert"]>;
+      };
+      exercises: {
+        Row: {
+          id: string;
+          homework_unit_id: string;
+          owner_id: string;
+          title: string;
+          description: string | null;
+          exercise_file_path: string | null;
+          exercise_file_name: string | null;
+          exercise_file_kind: FileKindEnum;
+          scoring_criteria: string | null;
+          max_score: number | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          homework_unit_id: string;
+          owner_id: string;
+          title: string;
+          description?: string | null;
+          exercise_file_path?: string | null;
+          exercise_file_name?: string | null;
+          exercise_file_kind?: FileKindEnum;
+          scoring_criteria?: string | null;
+          max_score?: number | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["exercises"]["Insert"]>;
+      };
+      answer_keys: {
+        Row: {
+          id: string;
+          exercise_id: string;
+          owner_id: string;
+          file_path: string | null;
+          file_name: string | null;
+          file_kind: FileKindEnum;
+          answer_text: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          exercise_id: string;
+          owner_id: string;
+          file_path?: string | null;
+          file_name?: string | null;
+          file_kind?: FileKindEnum;
+          answer_text?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["answer_keys"]["Insert"]>;
       };
       questions: {
         Row: {

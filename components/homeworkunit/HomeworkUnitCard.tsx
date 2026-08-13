@@ -3,7 +3,8 @@ import type { HomeworkUnit } from "@/lib/types";
 import { Card } from "@/components/ui/Card";
 
 export function HomeworkUnitCard({ unit }: { unit: HomeworkUnit }) {
-  const fileCount = unit.exercises.length + unit.answerKeys.length + unit.teachingMaterials.length;
+  const withAnswerKey = unit.exercises.filter((e) => e.answerKey).length;
+  const fileCount = unit.exercises.length + unit.teachingMaterials.length;
   return (
     <Link href={`/homework-units/${unit.id}`}>
       <Card className="h-full p-6 transition-colors hover:border-primary/40">
@@ -23,7 +24,7 @@ export function HomeworkUnitCard({ unit }: { unit: HomeworkUnit }) {
         </div>
         <div className="flex flex-wrap gap-1.5 text-[11px] text-ink/55">
           <span className="rounded-full bg-cream px-2.5 py-1">{unit.exercises.length} แบบฝึกหัด</span>
-          <span className="rounded-full bg-cream px-2.5 py-1">{unit.answerKeys.length} เฉลย</span>
+          <span className="rounded-full bg-cream px-2.5 py-1">{withAnswerKey} เฉลย</span>
           <span className="rounded-full bg-cream px-2.5 py-1">{unit.teachingMaterials.length} สื่อการสอน</span>
         </div>
         {fileCount === 0 && <div className="mt-2 text-[11px] text-ink/35">ยังไม่มีไฟล์แนบ</div>}

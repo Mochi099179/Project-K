@@ -7,7 +7,7 @@ import type { Classroom, Student } from "@/lib/types";
 import { finalQuestionResult } from "@/lib/types";
 import { useAppData } from "@/lib/store";
 import { Card } from "@/components/ui/Card";
-import { QuickCheckWizard } from "@/components/quickcheck/QuickCheckWizard";
+import { CheckFlowLauncher } from "@/components/quickcheck/CheckFlowLauncher";
 
 export function CheckHomeworkPanel({ classroom, student }: { classroom: Classroom; student: Student }) {
   const { getChecksForStudent } = useAppData();
@@ -17,7 +17,7 @@ export function CheckHomeworkPanel({ classroom, student }: { classroom: Classroo
 
   if (showWizard) {
     return (
-      <QuickCheckWizard
+      <CheckFlowLauncher
         presetClassroomId={classroom.id}
         presetStudentId={student.id}
         presetStudentLabel={student.studentId}

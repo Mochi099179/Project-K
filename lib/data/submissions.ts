@@ -148,6 +148,7 @@ async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Prom
         overallScore: s.overall_score ?? 0,
         errorMessage: s.error_message ?? undefined,
         homeworkUnitId: s.homework_unit_id,
+        exerciseId: s.exercise_id,
         classroomId: s.classroom_id,
         studentId: s.student_id,
         savedToProfile:
@@ -224,6 +225,7 @@ export async function createSubmissionShell(
     classroomId?: string | null;
     studentId?: string | null;
     homeworkUnitId?: string | null;
+    exerciseId?: string | null;
   }
 ): Promise<void> {
   const { error } = await supabase.from("submissions").insert({
@@ -233,6 +235,7 @@ export async function createSubmissionShell(
     student_id: input.studentId ?? null,
     classroom_id: input.classroomId ?? null,
     homework_unit_id: input.homeworkUnitId ?? null,
+    exercise_id: input.exerciseId ?? null,
     topic: input.topic ?? null,
     status: "processing",
     exercise_files: input.exerciseFiles as unknown as Database["public"]["Tables"]["submissions"]["Insert"]["exercise_files"],

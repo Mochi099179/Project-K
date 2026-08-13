@@ -1,15 +1,29 @@
 "use client";
 
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAppData } from "@/lib/store";
 import { BreadcrumbBar } from "@/components/layout/BreadcrumbBar";
 import { FileList } from "@/components/homeworkunit/FileList";
+import { ExerciseList } from "@/components/homeworkunit/ExerciseList";
 
 export default function HomeworkUnitDetailPage() {
   const params = useParams<{ unitId: string }>();
   const router = useRouter();
-  const { getHomeworkUnit, addFileToUnit } = useAppData();
+  const { getHomeworkUnit, addFileToUnit, deleteHomeworkUnit } = useAppData();
   const unit = getHomeworkUnit(params.unitId);
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDeleteUnit() {
+    if (!unit || !confirm(`ลบ Homework Unit "${unit.name}"? แบบฝึกหัด เฉลย และสื่อการสอนทั้งหมดในชุดนี้จะถูกลบด้วย`)) return;
+    setDeleting(true);
+    try {
+      await deleteHomeworkUnit(unit.id);
+      router.push("/homework-units");
+    } catch {
+      setDeleting(false);
+    }
+  }
 
   if (!unit) {
     return (
@@ -42,34 +56,26 @@ export default function HomeworkUnitDetailPage() {
               </div>
             </div>
           </div>
-          <button
-            onClick={() => router.push(`/quick-check?unitId=${unit.id}&topic=${encodeURIComponent(unit.name)}`)}
-            className="rounded-2xl bg-primary px-5 py-3 text-[13px] font-bold text-card"
-          >
-            ตรวจแบบฝึกหัดจากชุดนี้ →
-          </button>
+          <div className="flex flex-wrap gap-2.5">
+            <button onClick={handleDeleteUnit} disabled={deleting} className="rounded-2xl border border-border px-5 py-3 text-[13px] font-semibold text-[#BB6B53] disabled:opacity-40">
+              {deleting ? "กำลังลบ..." : "ลบ Homework Unit"}
+            </button>
+            <button
+              onClick={() => router.push(`/quick-check?unitId=${unit.id}`)}
+              className="rounded-2xl bg-primary px-5 py-3 text-[13px] font-bold text-card"
+            >
+              ตรวจแบบฝึกหัดจากชุดนี้ →
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <FileList
-            title="Exercises"
-            description="แบบฝึกหัดในชุดนี้"
-            files={unit.exercises}
-            onAdd={(file, kind) => addFileToUnit(unit.id, "exercises", file, kind)}
-            emptyLabel="ยังไม่มีแบบฝึกหัด"
-          />
-          <FileList
-            title="Answer Keys"
-            description="เฉลยของชุดนี้"
-            files={unit.answerKeys}
-            onAdd={(file, kind) => addFileToUnit(unit.id, "answerKeys", file, kind)}
-            emptyLabel="ยังไม่มีเฉลย"
-          />
+          <ExerciseList homeworkUnitId={unit.id} exercises={unit.exercises} />
           <FileList
             title="Teaching Materials"
             description="สื่อ/เอกสารประกอบการสอน"
             files={unit.teachingMaterials}
-            onAdd={(file, kind) => addFileToUnit(unit.id, "teachingMaterials", file, kind)}
+            onAdd={(file, kind) => addFileToUnit(unit.id, file, kind)}
             emptyLabel="ยังไม่มีสื่อการสอน"
           />
         </div>

@@ -63,38 +63,6 @@ export type TopStudent = {
   badgeBg: string;
 };
 
-export type ExerciseStatus = "graded" | "in_progress";
-
-export type ExerciseRow = {
-  name: string;
-  unit: string;
-  due: string;
-  submitted: number;
-  total: number;
-  avgScore: string;
-  status: ExerciseStatus;
-  statusLabel: string;
-  statusColor: string;
-  statusBg: string;
-};
-
-export type PlanRow = {
-  no: number;
-  focus: string;
-  duration: string;
-};
-
-export type SavedPlan = {
-  topic: string;
-  rows: PlanRow[];
-};
-
-export type TechniqueResult = {
-  techniques: string[];
-  keywords: string[];
-  activity: string;
-};
-
 export type Classroom = {
   id: string;
   name: string;
@@ -111,11 +79,8 @@ export type Classroom = {
   groups: Groups;
   subjectScores: SubjectScore[];
   topStudents: TopStudent[];
-  latestExercises: ExerciseRow[];
   problems: string[];
   students: Student[];
-  savedPlans?: SavedPlan[];
-  savedTechniques?: TechniqueResult[];
 };
 
 export type TaskItem = {
@@ -187,6 +152,7 @@ export type Check = {
   overallScore: number; // 0-100, derived from final (teacher-corrected if present, else AI) results
   errorMessage?: string;
   homeworkUnitId?: string | null;
+  exerciseId?: string | null;
   classroomId?: string | null; // set once bound to a classroom
   studentId?: string | null; // set once bound to a student
   savedToProfile?: { classroomId: string; studentId: string; savedAt: string } | null;
@@ -203,8 +169,35 @@ export function computeOverallScore(questions: CheckQuestion[]): number {
 }
 
 // ============================================================
-// HOMEWORK UNIT — entity separate from Classroom
+// HOMEWORK UNIT — entity separate from Classroom.
+// A reusable library: created once, reused across many Classrooms/students.
+// Each Exercise owns its own reference file, scoring criteria, and answer
+// key, so the Check workflow can load a full checking context from just a
+// homeworkUnitId + exerciseId, with no re-upload of reference material.
 // ============================================================
+
+export type ExerciseAnswerKey = {
+  id: string;
+  filePath: string | null;
+  fileName: string | null;
+  fileKind: FileKind;
+  answerText: string | null;
+};
+
+export type Exercise = {
+  id: string;
+  homeworkUnitId: string;
+  title: string;
+  description: string | null;
+  exerciseFilePath: string | null;
+  exerciseFileName: string | null;
+  exerciseFileKind: FileKind;
+  scoringCriteria: string | null;
+  maxScore: number | null;
+  answerKey: ExerciseAnswerKey | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export type HomeworkUnit = {
   id: string;
@@ -212,21 +205,15 @@ export type HomeworkUnit = {
   subject: string;
   grade: string;
   createdAt: string;
-  exercises: FileRef[];
-  answerKeys: FileRef[];
+  exercises: Exercise[];
   teachingMaterials: FileRef[];
 };
 
-export type GenerateType = "materials" | "exercises" | "plan" | "technique";
+export type GenerateType = "materials";
 
 export type MaterialsResult = {
   fileName: string;
   slides: string[];
-};
-
-export type ExerciseResultItem = {
-  q: string;
-  difficulty: string;
 };
 
 export const CLASSROOM_PROBLEM_OPTIONS = [
@@ -242,7 +229,4 @@ export const CLASSROOM_PROBLEM_OPTIONS = [
 
 export const GENERATE_TYPE_LABEL: Record<GenerateType, string> = {
   materials: "Teaching Materials",
-  exercises: "Exercise Set",
-  plan: "Lesson Plan",
-  technique: "Teaching Techniques",
 };

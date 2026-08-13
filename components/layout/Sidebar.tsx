@@ -31,12 +31,6 @@ const mainNavIcons = {
       <path d="M10 12h4" />
     </svg>
   ),
-  aitools: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3l1.4 4.2L18 8.6l-4.2 1.4L12 14l-1.4-4L6 8.6l4.6-1.4L12 3z" />
-      <path d="M19 15l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z" />
-    </svg>
-  ),
   settings: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -87,7 +81,6 @@ export function Sidebar() {
   const isQuickCheck = pathname?.startsWith("/quick-check") || pathname?.startsWith("/checks");
   const isClassroom = pathname?.startsWith("/classrooms");
   const isHomeworkUnit = pathname?.startsWith("/homework-units");
-  const isAiTools = pathname?.startsWith("/ai-tools");
 
   return (
     <aside className="sticky top-0 flex h-screen w-[250px] flex-shrink-0 flex-col gap-5.5 overflow-y-auto border-r border-border bg-card px-4 py-5.5">
@@ -109,7 +102,6 @@ export function Sidebar() {
         <NavButton href="/quick-check" icon={mainNavIcons.quickCheck} label="ตรวจแบบฝึกหัด" active={!!isQuickCheck} emphasize />
         <NavButton href="/classrooms" icon={mainNavIcons.classroom} label="ห้องเรียน" active={!!isClassroom} />
         <NavButton href="/homework-units" icon={mainNavIcons.homeworkUnit} label="Homework Unit" active={!!isHomeworkUnit} />
-        <NavButton href="/ai-tools/technique" icon={mainNavIcons.aitools} label="AI แนะนำ" active={!!isAiTools} />
       </div>
 
       <div className="mt-auto flex flex-col gap-3.5">

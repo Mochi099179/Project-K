@@ -27,7 +27,7 @@ function mapStudent(row: StudentRow): Student {
  * Maps a DB classroom (+ students) into the app's `Classroom` shape.
  *
  * Dashboard/analytics-only fields (trend, distribution, groups, subjectScores,
- * topStudents, latestExercises) are NOT part of the approved schema — they
+ * topStudents) are NOT part of the approved schema — they
  * were mock numbers even before this migration and remain a known follow-up
  * (see README). `avgScore`/`riskCount` ARE computed from real submissions
  * where the caller supplies `stats` (see listClassrooms/getClassroom below).
@@ -53,7 +53,6 @@ function mapClassroom(
     groups: { excellent: 0, good: 0, developing: 0, support: 0 },
     subjectScores: [],
     topStudents: [],
-    latestExercises: [],
     problems: asStringArray(row.learning_problems),
     students: students.map(mapStudent),
   };

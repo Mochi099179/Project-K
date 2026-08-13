@@ -4,6 +4,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { aiCheckResultSchema } from "@/lib/validation/ai-result";
 import { asFileRef, asFileRefList } from "@/lib/data/mappers";
 import { insertQuestionsAndEvaluations, updateSubmissionStatus, type InsertableQuestion } from "@/lib/data/submissions";
+import { getExerciseWithAnswerKey, listMaterialsForUnit } from "@/lib/data/homework-units";
 
 type AllowedMediaType = "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 
@@ -87,7 +88,6 @@ export async function POST(req: Request) {
   }
 
   const exerciseFileRefs = asFileRefList(submission.exercise_files);
-  const answerKeyFileRef = asFileRef(submission.answer_key_file);
 
   const exerciseImages = (
     await Promise.all(exerciseFileRefs.map((f) => downloadAsBase64(supabase, "submissions", f.storage_path)))
@@ -98,9 +98,55 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "ไม่พบไฟล์แบบฝึกหัดของนักเรียน" }, { status: 400 });
   }
 
-  const answerKeyImage = answerKeyFileRef ? await downloadAsBase64(supabase, "submissions", answerKeyFileRef.storage_path) : null;
+  // Two sources of reference material: a reusable Homework Unit Exercise
+  // (submission.exercise_id set — teacher never re-uploaded anything), or
+  // the standalone Quick Check fields uploaded directly onto this submission.
+  let referenceExerciseImage: { base64: string; mediaType: AllowedMediaType } | null = null;
+  let answerKeyImage: { base64: string; mediaType: AllowedMediaType } | null = null;
+  let answerKeyText = submission.answer_key_text?.trim() || null;
+  let scoringCriteria: string | null = null;
+  let teachingMaterialsLine: string | null = null;
 
-  if (!submission.answer_key_text?.trim() && !answerKeyImage) {
+  if (submission.exercise_id) {
+    const exercise = await getExerciseWithAnswerKey(supabase, submission.exercise_id);
+    if (exercise) {
+      scoringCriteria = exercise.scoringCriteria;
+      // Only image files can go into the vision request; a PDF/other reference
+      // is still noted by name in the text context below so checking never
+      // silently drops it (and never mislabels non-image bytes as an image).
+      if (exercise.exerciseFilePath && exercise.exerciseFileKind === "image") {
+        referenceExerciseImage = await downloadAsBase64(supabase, "exercises", exercise.exerciseFilePath);
+      }
+      if (exercise.answerKey?.filePath && exercise.answerKey.fileKind === "image") {
+        answerKeyImage = await downloadAsBase64(supabase, "answer-keys", exercise.answerKey.filePath);
+      }
+      answerKeyText = exercise.answerKey?.answerText?.trim() || null;
+
+      const unreadableRefs = [
+        exercise.exerciseFilePath && exercise.exerciseFileKind !== "image" ? `แบบฝึกหัดต้นฉบับ: ${exercise.exerciseFileName}` : null,
+        exercise.answerKey?.filePath && exercise.answerKey.fileKind !== "image" ? `ไฟล์เฉลย: ${exercise.answerKey.fileName}` : null,
+      ].filter(Boolean);
+      if (unreadableRefs.length) {
+        teachingMaterialsLine = `หมายเหตุ: มีไฟล์อ้างอิงที่ไม่ใช่รูปภาพแนบมาด้วย (ไม่ได้แสดงเนื้อหาให้ดู): ${unreadableRefs.join(", ")}`;
+      }
+    }
+    if (submission.homework_unit_id) {
+      const materials = await listMaterialsForUnit(supabase, submission.homework_unit_id);
+      if (materials.length) {
+        teachingMaterialsLine = [
+          teachingMaterialsLine,
+          `มีสื่อการสอนที่เกี่ยวข้องกับชุดแบบฝึกหัดนี้ ${materials.length} ไฟล์: ${materials.map((m) => m.name).join(", ")}`,
+        ]
+          .filter(Boolean)
+          .join("\n");
+      }
+    }
+  } else {
+    const answerKeyFileRef = asFileRef(submission.answer_key_file);
+    answerKeyImage = answerKeyFileRef ? await downloadAsBase64(supabase, "submissions", answerKeyFileRef.storage_path) : null;
+  }
+
+  if (!answerKeyText && !answerKeyImage) {
     await updateSubmissionStatus(supabase, submissionId, { status: "failed", errorMessage: "ไม่มีเฉลยแนบมา" });
     return NextResponse.json({ error: "กรุณาแนบเฉลย" }, { status: 400 });
   }
@@ -111,17 +157,21 @@ export async function POST(req: Request) {
     `Student ID: ${submission.student_code}`,
     submission.topic ? `หัวข้อ/บทเรียน: ${submission.topic}` : null,
     submission.teaching_materials_text?.trim() ? `สื่อ/บันทึกการสอนที่เกี่ยวข้อง:\n${submission.teaching_materials_text.trim()}` : null,
-    submission.answer_key_text?.trim() ? `เฉลย/เกณฑ์การให้คะแนน (ข้อความ):\n${submission.answer_key_text.trim()}` : null,
+    teachingMaterialsLine,
+    answerKeyText ? `เฉลย/เกณฑ์การให้คะแนน (ข้อความ):\n${answerKeyText}` : null,
+    scoringCriteria?.trim() ? `เกณฑ์การให้คะแนน (Scoring Criteria) — ใช้เกณฑ์นี้ในการให้คะแนนแต่ละข้ออย่างเคร่งครัด:\n${scoringCriteria.trim()}` : null,
   ].filter(Boolean);
 
   const instructions = [
     "คุณกำลังตรวจแบบฝึกหัดของนักเรียนให้ครูคนหนึ่ง",
     "ภาพแรกๆ ที่แนบมา (ถ้ามีมากกว่า 1 ภาพ) คือหน้าแบบฝึกหัดของนักเรียนที่เขียนด้วยลายมือ ให้อ่านทุกหน้าประกอบกัน",
+    referenceExerciseImage ? "ภาพถัดมาคือแบบฝึกหัดต้นฉบับ (โจทย์เปล่า) จากชุด Homework Unit ให้ใช้เทียบกับสิ่งที่นักเรียนทำ" : null,
     answerKeyImage ? "ภาพสุดท้ายที่แนบมาคือรูปเฉลย ให้ใช้ประกอบการตรวจด้วย" : null,
     "",
     "ทำตามลำดับนี้อย่างเคร่งครัด:",
     "1. อ่านลายมือนักเรียนและแยกออกเป็นข้อๆ โดยให้โจทย์และคำตอบของนักเรียนอยู่ใน block เดียวกันเสมอ ห้ามแยกเป็นคนละ entity",
     "2. สำหรับแต่ละข้อ ให้ประเมินโดยพิจารณาจากโจทย์ คำตอบนักเรียน เฉลย และสื่อการสอน/บริบทที่ให้มาประกอบกัน ไม่ใช่ดูแค่เฉลยอย่างเดียว",
+    scoringCriteria?.trim() ? "2b. มีเกณฑ์การให้คะแนน (Scoring Criteria) แนบมาด้วย ต้องใช้เกณฑ์นี้ในการคำนวณ score ของแต่ละข้อ ห้ามใช้ดุลยพินิจแทน" : null,
     "3. แยกความมั่นใจสองแบบให้ชัดเจน: extraction_confidence (มั่นใจแค่ไหนว่าถอดโจทย์/คำตอบถูกต้อง) กับ evaluation_confidence (มั่นใจแค่ไหนว่าผลตรวจถูกต้อง) ห้ามใช้ค่าเดียวกันปนกัน",
     "4. ถ้าตอบผิด ให้วิเคราะห์ให้ลึกกว่าผิด/ถูก — บอกประเภทข้อผิดพลาด แนวคิดที่ยังไม่เข้าใจ เหตุผลประกอบ และสิ่งที่ควรเสริม",
     "5. เขียนทุกอย่างเป็นภาษาไทย กระชับ เข้าใจง่ายสำหรับครู",
@@ -152,6 +202,7 @@ export async function POST(req: Request) {
           role: "user",
           content: [
             ...exerciseImages.map((img) => imageBlock(img.base64, img.mediaType)),
+            ...(referenceExerciseImage ? [imageBlock(referenceExerciseImage.base64, referenceExerciseImage.mediaType)] : []),
             ...(answerKeyImage ? [imageBlock(answerKeyImage.base64, answerKeyImage.mediaType)] : []),
             { type: "text", text: [contextLines.join("\n\n"), "", instructions].join("\n") },
           ],
