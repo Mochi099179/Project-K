@@ -14,7 +14,7 @@ import { getSupabaseBrowserClient } from "./supabase/client";
 import * as classroomsApi from "./data/classrooms";
 import * as homeworkUnitsApi from "./data/homework-units";
 import * as submissionsApi from "./data/submissions";
-import type { ReadImageResult } from "./files";
+import type { ReadFileResult } from "./files";
 
 type NewStudentInput = { name?: string; studentId: string; seatNo?: number; gender?: "M" | "F" };
 type CreateClassroomInput = { name: string; grade: string; problems: string[]; students?: NewStudentInput[] };
@@ -25,8 +25,8 @@ type StartCheckInput = {
   topic?: string;
   teachingMaterialsText?: string;
   answerKeyText?: string;
-  answerKeyImage?: ReadImageResult | null;
-  exerciseImages: ReadImageResult[];
+  answerKeyImage?: ReadFileResult | null;
+  exerciseImages: ReadFileResult[];
   classroomId?: string | null;
   studentId?: string | null;
   homeworkUnitId?: string | null;
@@ -233,7 +233,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         status: "processing",
         studentLabel: input.studentLabel,
         topic: input.topic,
-        exerciseImages: input.exerciseImages.map((i) => i.dataUrl),
+        exerciseFiles: input.exerciseImages.map((i) => ({ url: i.dataUrl, name: i.name, kind: i.kind })),
         questions: [],
         overallScore: 0,
         homeworkUnitId: input.homeworkUnitId ?? null,
@@ -251,10 +251,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
           const exerciseFileRefs = [];
           for (const img of input.exerciseImages) {
-            exerciseFileRefs.push(await submissionsApi.uploadSubmissionFile(supabase, userId, id, img.file));
+            exerciseFileRefs.push(await submissionsApi.uploadSubmissionFile(supabase, userId, id, img.file, img.kind));
           }
           const answerKeyFileRef = input.answerKeyImage
-            ? await submissionsApi.uploadSubmissionFile(supabase, userId, id, input.answerKeyImage.file)
+            ? await submissionsApi.uploadSubmissionFile(supabase, userId, id, input.answerKeyImage.file, input.answerKeyImage.kind)
             : null;
 
           await submissionsApi.createSubmissionShell(supabase, userId, {

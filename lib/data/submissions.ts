@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
-import type { Check, CheckQuestion, CheckStatus, QuestionResult } from "@/lib/types";
+import type { Check, CheckQuestion, CheckStatus, ExerciseFileRef, FileKind, QuestionResult } from "@/lib/types";
+import { inferFileKind } from "@/lib/files";
 import { asFileRefList, asStringArray, type StoredFileRef } from "./mappers";
 
 type Client = SupabaseClient<Database>;
@@ -58,19 +59,20 @@ function toTeacherResult(correction: CorrectionRow): QuestionResult {
   };
 }
 
-async function exerciseImageUrls(supabase: Client, files: StoredFileRef[]): Promise<string[]> {
+async function exerciseFileRefs(supabase: Client, files: StoredFileRef[]): Promise<ExerciseFileRef[]> {
   // The `submissions` bucket is private (student work must never be publicly
   // accessible), so getPublicUrl() would return a URL that 403s. Signed URLs
   // are the correct way to let the currently-authenticated owner view their
   // own files; they expire after an hour.
-  const urls = await Promise.all(
+  const refs = await Promise.all(
     files.map(async (f) => {
       const { data, error } = await supabase.storage.from("submissions").createSignedUrl(f.storage_path, 60 * 60);
       if (error || !data) return null;
-      return data.signedUrl;
+      // Older rows predate file_kind — fall back to inferring from the filename.
+      return { url: data.signedUrl, name: f.file_name, kind: f.file_kind ?? inferFileKind(f.file_name) };
     })
   );
-  return urls.filter((u): u is string => !!u);
+  return refs.filter((r): r is ExerciseFileRef => !!r);
 }
 
 /**
@@ -143,7 +145,7 @@ async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Prom
         status: toCheckStatus(s.status),
         studentLabel: s.student_code,
         topic: s.topic ?? undefined,
-        exerciseImages: await exerciseImageUrls(supabase, asFileRefList(s.exercise_files)),
+        exerciseFiles: await exerciseFileRefs(supabase, asFileRefList(s.exercise_files)),
         questions: mappedQuestions,
         overallScore: s.overall_score ?? 0,
         errorMessage: s.error_message ?? undefined,
@@ -203,12 +205,13 @@ export async function uploadSubmissionFile(
   supabase: Client,
   ownerId: string,
   submissionId: string,
-  file: File
+  file: File,
+  kind: FileKind
 ): Promise<StoredFileRef> {
   const path = `${ownerId}/${submissionId}/${Date.now()}-${file.name}`;
   const { error } = await supabase.storage.from("submissions").upload(path, file);
   if (error) throw error;
-  return { storage_path: path, file_name: file.name };
+  return { storage_path: path, file_name: file.name, file_kind: kind };
 }
 
 export async function createSubmissionShell(

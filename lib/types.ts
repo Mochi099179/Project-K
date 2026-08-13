@@ -140,6 +140,9 @@ export type CheckQuestion = {
 
 export type CheckStatus = "processing" | "failed" | "needs_review" | "reviewed";
 
+/** One attached page of student work — image, PDF, or text file — for the left-panel document viewer. */
+export type ExerciseFileRef = { url: string; name: string; kind: FileKind };
+
 /** A Check (Submission) links a student's work to AI evaluation and (optionally) a Classroom + Student. */
 export type Check = {
   id: string;
@@ -147,7 +150,7 @@ export type Check = {
   status: CheckStatus;
   studentLabel: string; // Student ID as entered in Quick Check, or the bound student's studentId
   topic?: string;
-  exerciseImages: string[]; // data URLs for the left-panel document viewer
+  exerciseFiles: ExerciseFileRef[]; // pages of the student's submitted work, for the left-panel document viewer
   questions: CheckQuestion[];
   overallScore: number; // 0-100, derived from final (teacher-corrected if present, else AI) results
   errorMessage?: string;

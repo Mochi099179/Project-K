@@ -2,16 +2,8 @@
 
 import { useRef, useState } from "react";
 import type { FileKind, FileRef } from "@/lib/types";
+import { inferFileKind } from "@/lib/files";
 import { Card } from "@/components/ui/Card";
-
-function inferKind(name: string): FileKind {
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (!ext) return "other";
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image";
-  if (ext === "pdf") return "pdf";
-  if (["txt", "md", "doc", "docx"].includes(ext)) return "text";
-  return "other";
-}
 
 const KIND_ICON: Record<FileKind, string> = { image: "🖼️", pdf: "📄", text: "📝", other: "📎" };
 
@@ -38,7 +30,7 @@ export function FileList({
     setError(null);
     try {
       for (const f of Array.from(fileList)) {
-        await onAdd(f, inferKind(f.name));
+        await onAdd(f, inferFileKind(f.name));
       }
     } catch {
       setError("อัปโหลดไม่สำเร็จ กรุณาลองใหม่");

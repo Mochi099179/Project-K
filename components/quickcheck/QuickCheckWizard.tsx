@@ -2,7 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useAppData } from "@/lib/store";
-import { readImageFile, ACCEPTED_IMAGE_TYPES, type ReadImageResult } from "@/lib/files";
+import type { FileKind } from "@/lib/types";
+import { readAttachedFile, ACCEPTED_ATTACHMENT_TYPES, type ReadFileResult } from "@/lib/files";
 import { Card } from "@/components/ui/Card";
 
 type Step = 1 | 2 | 3 | 4 | 5;
@@ -38,10 +39,10 @@ export function QuickCheckWizard({
   const [studentLabel, setStudentLabel] = useState(presetStudentLabel);
   const [topic, setTopic] = useState(presetTopic);
   const [teachingMaterialsText, setTeachingMaterialsText] = useState("");
-  const [teachingMaterialsImages, setTeachingMaterialsImages] = useState<ReadImageResult[]>([]);
+  const [teachingMaterialsImages, setTeachingMaterialsImages] = useState<ReadFileResult[]>([]);
   const [answerKeyText, setAnswerKeyText] = useState("");
-  const [answerKeyImage, setAnswerKeyImage] = useState<ReadImageResult | null>(null);
-  const [exerciseImages, setExerciseImages] = useState<ReadImageResult[]>([]);
+  const [answerKeyImage, setAnswerKeyImage] = useState<ReadFileResult | null>(null);
+  const [exerciseImages, setExerciseImages] = useState<ReadFileResult[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,19 +57,19 @@ export function QuickCheckWizard({
 
   async function handleMaterialsFiles(files: FileList | null) {
     if (!files) return;
-    const read = await Promise.all(Array.from(files).map(readImageFile));
+    const read = await Promise.all(Array.from(files).map(readAttachedFile));
     setTeachingMaterialsImages((prev) => [...prev, ...read]);
   }
 
   async function handleAnswerKeyFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    setAnswerKeyImage(await readImageFile(file));
+    setAnswerKeyImage(await readAttachedFile(file));
   }
 
   async function handleExerciseFiles(files: FileList | null) {
     if (!files) return;
-    const read = await Promise.all(Array.from(files).map(readImageFile));
+    const read = await Promise.all(Array.from(files).map(readAttachedFile));
     setExerciseImages((prev) => [...prev, ...read]);
   }
 
@@ -172,7 +173,7 @@ export function QuickCheckWizard({
             className="mb-3 h-28 w-full resize-none rounded-2xl border border-border bg-cream p-3.5 text-[12.5px] text-ink outline-none"
           />
           <UploadRow
-            label="แนบไฟล์สื่อการสอน (รูปภาพ)"
+            label="แนบไฟล์สื่อการสอน (รูปภาพ, PDF, ข้อความ)"
             files={teachingMaterialsImages.map((f) => f.name)}
             onPick={() => materialsInputRef.current?.click()}
             onRemove={(i) => setTeachingMaterialsImages((prev) => prev.filter((_, idx) => idx !== i))}
@@ -180,7 +181,7 @@ export function QuickCheckWizard({
           <input
             ref={materialsInputRef}
             type="file"
-            accept={ACCEPTED_IMAGE_TYPES.join(",")}
+            accept={ACCEPTED_ATTACHMENT_TYPES.join(",")}
             multiple
             onChange={(e) => handleMaterialsFiles(e.target.files)}
             className="hidden"
@@ -192,7 +193,7 @@ export function QuickCheckWizard({
       {step === 3 && (
         <div>
           <h2 className="mb-1.5 text-lg font-bold text-ink">เฉลย (Answer Key)</h2>
-          <p className="mb-5 text-[13px] leading-[1.6] text-ink/55">พิมพ์เฉลย หรือแนบรูปเฉลยอย่างน้อยหนึ่งอย่าง</p>
+          <p className="mb-5 text-[13px] leading-[1.6] text-ink/55">พิมพ์เฉลย หรือแนบไฟล์เฉลยอย่างน้อยหนึ่งอย่าง</p>
           <textarea
             value={answerKeyText}
             onChange={(e) => setAnswerKeyText(e.target.value)}
@@ -200,7 +201,7 @@ export function QuickCheckWizard({
             className="mb-3 h-28 w-full resize-none rounded-2xl border border-border bg-cream p-3.5 text-[12.5px] text-ink outline-none"
           />
           <UploadRow
-            label="หรือแนบรูปเฉลย"
+            label="หรือแนบไฟล์เฉลย (รูปภาพ, PDF, ข้อความ)"
             files={answerKeyImage ? [answerKeyImage.name] : []}
             onPick={() => answerKeyInputRef.current?.click()}
             onRemove={() => setAnswerKeyImage(null)}
@@ -208,7 +209,7 @@ export function QuickCheckWizard({
           <input
             ref={answerKeyInputRef}
             type="file"
-            accept={ACCEPTED_IMAGE_TYPES.join(",")}
+            accept={ACCEPTED_ATTACHMENT_TYPES.join(",")}
             onChange={(e) => handleAnswerKeyFile(e.target.files)}
             className="hidden"
           />
@@ -220,20 +221,21 @@ export function QuickCheckWizard({
         <div>
           <h2 className="mb-1.5 text-lg font-bold text-ink">แบบฝึกหัดของนักเรียน</h2>
           <p className="mb-5 text-[13px] leading-[1.6] text-ink/55">
-            แนบรูปถ่าย/สแกนงานของนักเรียน แนบได้หลายหน้าถ้างานมีหลายหน้า
+            แนบรูปถ่าย/สแกนงานของนักเรียน, ไฟล์ PDF หรือไฟล์ข้อความ — แนบได้หลายไฟล์ถ้างานมีหลายหน้า
           </p>
           <UploadRow
-            label="แนบรูปแบบฝึกหัด"
+            label="แนบไฟล์แบบฝึกหัด"
             files={exerciseImages.map((f) => f.name)}
             onPick={() => exerciseInputRef.current?.click()}
             onRemove={(i) => setExerciseImages((prev) => prev.filter((_, idx) => idx !== i))}
             emphasize
             previewDataUrls={exerciseImages.map((f) => f.dataUrl)}
+            kinds={exerciseImages.map((f) => f.kind)}
           />
           <input
             ref={exerciseInputRef}
             type="file"
-            accept={ACCEPTED_IMAGE_TYPES.join(",")}
+            accept={ACCEPTED_ATTACHMENT_TYPES.join(",")}
             multiple
             onChange={(e) => handleExerciseFiles(e.target.files)}
             className="hidden"
@@ -317,6 +319,8 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+const KIND_THUMBNAIL_ICON: Record<FileKind, string> = { image: "🖼️", pdf: "📄", text: "📝", other: "📎" };
+
 function UploadRow({
   label,
   files,
@@ -324,6 +328,7 @@ function UploadRow({
   onRemove,
   emphasize,
   previewDataUrls,
+  kinds,
 }: {
   label: string;
   files: string[];
@@ -331,6 +336,7 @@ function UploadRow({
   onRemove: (index: number) => void;
   emphasize?: boolean;
   previewDataUrls?: string[];
+  kinds?: FileKind[];
 }) {
   return (
     <div>
@@ -344,18 +350,23 @@ function UploadRow({
       </button>
       {files.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-2">
-          {files.map((name, i) => (
-            <span key={name + i} className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] text-ink">
-              {previewDataUrls?.[i] && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={previewDataUrls[i]} alt="" className="h-4 w-4 rounded-sm object-cover" />
-              )}
-              {name}
-              <button onClick={() => onRemove(i)} className="text-ink/40 hover:text-ink">
-                ✕
-              </button>
-            </span>
-          ))}
+          {files.map((name, i) => {
+            const kind = kinds?.[i] ?? "image";
+            return (
+              <span key={name + i} className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] text-ink">
+                {kind === "image" && previewDataUrls?.[i] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={previewDataUrls[i]} alt="" className="h-4 w-4 rounded-sm object-cover" />
+                ) : (
+                  previewDataUrls && <span className="text-sm leading-none">{KIND_THUMBNAIL_ICON[kind]}</span>
+                )}
+                {name}
+                <button onClick={() => onRemove(i)} className="text-ink/40 hover:text-ink">
+                  ✕
+                </button>
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

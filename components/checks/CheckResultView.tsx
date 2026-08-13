@@ -112,7 +112,7 @@ export function CheckResultView({ check }: { check: Check }) {
         <Card className="rounded-[1.75rem] p-4 lg:sticky lg:top-24 lg:h-[calc(100vh-160px)]">
           <div className="mb-2 px-1 font-mono text-[10px] uppercase tracking-wide text-ink/45">Student Exercise</div>
           <div className="h-[420px] lg:h-[calc(100%-28px)]">
-            <ExerciseViewer images={check.exerciseImages} />
+            <ExerciseViewer files={check.exerciseFiles} />
           </div>
         </Card>
 

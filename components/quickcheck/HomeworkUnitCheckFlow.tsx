@@ -3,8 +3,10 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { useAppData } from "@/lib/store";
-import { readImageFile, ACCEPTED_IMAGE_TYPES, type ReadImageResult } from "@/lib/files";
+import { readAttachedFile, ACCEPTED_ATTACHMENT_TYPES, type ReadFileResult } from "@/lib/files";
 import { Card } from "@/components/ui/Card";
+
+const KIND_THUMBNAIL_ICON: Record<ReadFileResult["kind"], string> = { image: "🖼️", pdf: "📄", text: "📝", other: "📎" };
 
 export function HomeworkUnitCheckFlow({
   presetClassroomId = null,
@@ -25,7 +27,7 @@ export function HomeworkUnitCheckFlow({
   const [homeworkUnitId, setHomeworkUnitId] = useState<string | null>(initialHomeworkUnitId);
   const [exerciseId, setExerciseId] = useState<string | null>(null);
   const [studentLabel, setStudentLabel] = useState(presetStudentLabel);
-  const [studentWork, setStudentWork] = useState<ReadImageResult[]>([]);
+  const [studentWork, setStudentWork] = useState<ReadFileResult[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,7 +46,7 @@ export function HomeworkUnitCheckFlow({
 
   async function handleFiles(files: FileList | null) {
     if (!files) return;
-    const read = await Promise.all(Array.from(files).map(readImageFile));
+    const read = await Promise.all(Array.from(files).map(readAttachedFile));
     setStudentWork((prev) => [...prev, ...read]);
   }
 
@@ -156,12 +158,12 @@ export function HomeworkUnitCheckFlow({
         onClick={() => fileInputRef.current?.click()}
         className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-primary/40 bg-primary/8 px-4 py-5 text-center text-[13px] font-semibold text-primary-dark"
       >
-        <span className="text-base">📎</span> แนบรูปงานของนักเรียน
+        <span className="text-base">📎</span> แนบไฟล์งานของนักเรียน (รูปภาพ, PDF, ข้อความ)
       </button>
       <input
         ref={fileInputRef}
         type="file"
-        accept={ACCEPTED_IMAGE_TYPES.join(",")}
+        accept={ACCEPTED_ATTACHMENT_TYPES.join(",")}
         multiple
         onChange={(e) => handleFiles(e.target.files)}
         className="hidden"
@@ -170,8 +172,12 @@ export function HomeworkUnitCheckFlow({
         <div className="mb-5 flex flex-wrap gap-2">
           {studentWork.map((f, i) => (
             <span key={f.name + i} className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[11px] text-ink">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={f.dataUrl} alt="" className="h-4 w-4 rounded-sm object-cover" />
+              {f.kind === "image" ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={f.dataUrl} alt="" className="h-4 w-4 rounded-sm object-cover" />
+              ) : (
+                <span className="text-sm leading-none">{KIND_THUMBNAIL_ICON[f.kind]}</span>
+              )}
               {f.name}
               <button onClick={() => setStudentWork((prev) => prev.filter((_, idx) => idx !== i))} className="text-ink/40 hover:text-ink">
                 ✕

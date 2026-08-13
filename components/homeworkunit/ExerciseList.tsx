@@ -1,18 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Exercise, FileKind } from "@/lib/types";
+import type { Exercise } from "@/lib/types";
 import { useAppData } from "@/lib/store";
+import { inferFileKind } from "@/lib/files";
 import { Card } from "@/components/ui/Card";
-
-function inferKind(name: string): FileKind {
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (!ext) return "other";
-  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image";
-  if (ext === "pdf") return "pdf";
-  if (["txt", "md", "doc", "docx"].includes(ext)) return "text";
-  return "other";
-}
 
 export function ExerciseList({ homeworkUnitId, exercises }: { homeworkUnitId: string; exercises: Exercise[] }) {
   const { deleteExercise } = useAppData();
@@ -112,8 +104,8 @@ function CreateExerciseModal({ homeworkUnitId, onClose }: { homeworkUnitId: stri
         title: title.trim(),
         description: description.trim() || undefined,
         scoringCriteria: scoringCriteria.trim() || undefined,
-        exerciseFile: exerciseFile ? { file: exerciseFile, kind: inferKind(exerciseFile.name) } : null,
-        answerKeyFile: answerKeyFile ? { file: answerKeyFile, kind: inferKind(answerKeyFile.name) } : null,
+        exerciseFile: exerciseFile ? { file: exerciseFile, kind: inferFileKind(exerciseFile.name) } : null,
+        answerKeyFile: answerKeyFile ? { file: answerKeyFile, kind: inferFileKind(answerKeyFile.name) } : null,
         answerKeyText: answerKeyText.trim() || undefined,
       });
       onClose();
