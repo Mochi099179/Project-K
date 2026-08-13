@@ -14,7 +14,9 @@ export type SubmissionStatus =
   | "evaluating"
   | "review_required"
   | "completed"
-  | "failed";
+  | "failed"
+  | "ocr_failed"
+  | "analysis_failed";
 
 export type HomeworkFileGroup = "exercise" | "answer_key" | "material";
 export type FileKindEnum = "image" | "pdf" | "text" | "other";
@@ -333,27 +335,27 @@ export interface Database {
         Row: {
           id: string;
           submission_id: string;
-          question_number: number;
+          question_number: number | null;
           question_text: string;
           student_answer: string;
           expected_answer: string;
           keywords: Json; // string[]
-          features: Json; // string[]
-          context: Json; // string[]
           extraction_confidence: number;
+          ocr_uncertain: boolean;
+          ocr_alternatives: Json; // string[]
           created_at: string;
         };
         Insert: {
           id?: string;
           submission_id: string;
-          question_number: number;
+          question_number?: number | null;
           question_text: string;
           student_answer?: string;
           expected_answer?: string;
           keywords?: Json;
-          features?: Json;
-          context?: Json;
           extraction_confidence?: number;
+          ocr_uncertain?: boolean;
+          ocr_alternatives?: Json;
         };
         Update: Partial<Database["public"]["Tables"]["questions"]["Insert"]>;
         Relationships: [
@@ -377,6 +379,8 @@ export interface Database {
           reasoning: string;
           areas_to_improve: Json; // string[]
           evaluation_confidence: number;
+          needs_review: boolean;
+          review_reason: string;
           created_at: string;
         };
         Insert: {
@@ -389,6 +393,8 @@ export interface Database {
           reasoning?: string;
           areas_to_improve?: Json;
           evaluation_confidence?: number;
+          needs_review?: boolean;
+          review_reason?: string;
         };
         Update: Partial<Database["public"]["Tables"]["evaluations"]["Insert"]>;
         Relationships: [
@@ -397,6 +403,51 @@ export interface Database {
             columns: ["question_id"];
             isOneToOne: true;
             referencedRelation: "questions";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      ocr_results: {
+        Row: {
+          id: string;
+          submission_id: string;
+          owner_id: string;
+          provider: string;
+          model: string;
+          raw_response: Json;
+          normalized_result: Json; // { pages: { page_number: number; content: string; confidence?: number | null }[] }
+          teacher_corrected_text: string | null;
+          status: "completed" | "failed";
+          error_message: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          submission_id: string;
+          owner_id: string;
+          provider: string;
+          model: string;
+          raw_response: Json;
+          normalized_result: Json;
+          teacher_corrected_text?: string | null;
+          status: "completed" | "failed";
+          error_message?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["ocr_results"]["Insert"]>;
+        Relationships: [
+          {
+            foreignKeyName: "ocr_results_submission_id_fkey";
+            columns: ["submission_id"];
+            isOneToOne: false;
+            referencedRelation: "submissions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ocr_results_owner_id_fkey";
+            columns: ["owner_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           }
         ];
@@ -450,14 +501,14 @@ export interface Database {
         Row: {
           question_id: string;
           submission_id: string;
-          question_number: number;
+          question_number: number | null;
           question_text: string;
           student_answer: string;
           expected_answer: string;
           keywords: Json;
-          features: Json;
-          context: Json;
           extraction_confidence: number;
+          ocr_uncertain: boolean;
+          ocr_alternatives: Json;
           evaluation_id: string;
           evaluation_confidence: number;
           is_correct: boolean;
@@ -467,6 +518,8 @@ export interface Database {
           reasoning: string;
           areas_to_improve: Json;
           is_teacher_corrected: boolean;
+          needs_review: boolean;
+          review_reason: string;
         };
         Relationships: [];
       };

@@ -76,6 +76,9 @@ type AppDataContextValue = {
   getRecentChecks: (limit?: number) => Check[];
   startCheck: (input: StartCheckInput) => Promise<string>;
   correctQuestion: (checkId: string, questionId: string, correction: QuestionResult) => Promise<void>;
+  correctOcrText: (checkId: string, correctedText: string | null) => Promise<void>;
+  retryOcr: (checkId: string) => Promise<void>;
+  retryAnalysis: (checkId: string) => Promise<void>;
   markReviewed: (checkId: string) => Promise<void>;
   saveCheckToProfile: (checkId: string, classroomId: string, studentId: string) => Promise<void>;
 
@@ -234,6 +237,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
         studentLabel: input.studentLabel,
         topic: input.topic,
         exerciseFiles: input.exerciseImages.map((i) => ({ url: i.dataUrl, name: i.name, kind: i.kind })),
+        ocrResult: null,
         questions: [],
         overallScore: 0,
         homeworkUnitId: input.homeworkUnitId ?? null,
@@ -284,6 +288,22 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
             setChecks((prev) => [refreshed, ...prev.filter((c) => c.id !== id)]);
           }
         } catch (err) {
+          // The server already wrote the precise status (ocr_failed vs.
+          // analysis_failed vs. a pre-flight "failed") before this request
+          // rejected — refetch it instead of guessing, so the UI shows the
+          // same detail a page reload would. Only fall back to a generic
+          // placeholder if the submission row was never created (e.g. the
+          // file upload itself failed) or the refetch can't reach Supabase.
+          try {
+            const supabase = getSupabaseBrowserClient();
+            const refreshed = await submissionsApi.getSubmission(supabase, id);
+            if (refreshed) {
+              setChecks((prev) => [refreshed, ...prev.filter((c) => c.id !== id)]);
+              return;
+            }
+          } catch {
+            // fall through to the generic placeholder below
+          }
           setChecks((prev) =>
             prev.map((c) =>
               c.id === id
@@ -317,6 +337,33 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     },
     [userId]
   );
+
+  const correctOcrText = useCallback(async (checkId: string, correctedText: string | null) => {
+    const check = checks.find((c) => c.id === checkId);
+    if (!check?.ocrResult) throw new Error("ไม่พบผลอ่านลายมือสำหรับคำขอตรวจนี้");
+    const supabase = getSupabaseBrowserClient();
+    await submissionsApi.updateOcrCorrectedText(supabase, check.ocrResult.id, correctedText);
+    setChecks((prev) =>
+      prev.map((c) => (c.id !== checkId || !c.ocrResult ? c : { ...c, ocrResult: { ...c.ocrResult, teacherCorrectedText: correctedText } }))
+    );
+  }, [checks]);
+
+  const runRetry = useCallback(async (checkId: string, path: "retry-ocr" | "retry-analysis") => {
+    const supabase = getSupabaseBrowserClient();
+    const res = await fetch(`/api/process-check/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ submissionId: checkId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+
+    const refreshed = await submissionsApi.getSubmission(supabase, checkId);
+    if (refreshed) setChecks((prev) => prev.map((c) => (c.id === checkId ? refreshed : c)));
+  }, []);
+
+  const retryOcr = useCallback((checkId: string) => runRetry(checkId, "retry-ocr"), [runRetry]);
+  const retryAnalysis = useCallback((checkId: string) => runRetry(checkId, "retry-analysis"), [runRetry]);
 
   const markReviewed = useCallback(async (checkId: string) => {
     const supabase = getSupabaseBrowserClient();
@@ -420,6 +467,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getRecentChecks,
       startCheck,
       correctQuestion,
+      correctOcrText,
+      retryOcr,
+      retryAnalysis,
       markReviewed,
       saveCheckToProfile,
       homeworkUnits,
@@ -450,6 +500,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       getRecentChecks,
       startCheck,
       correctQuestion,
+      correctOcrText,
+      retryOcr,
+      retryAnalysis,
       markReviewed,
       saveCheckToProfile,
       homeworkUnits,

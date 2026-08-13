@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { runFullPipeline } from "@/lib/pipeline/check-pipeline";
+import { runAnalysisStage } from "@/lib/pipeline/check-pipeline";
 
-/** Runs the full two-stage pipeline (Handwriting recognition → Answer analysis) for a freshly created submission. */
+/**
+ * Re-runs ONLY the Answer analysis stage, against whatever `questions` rows
+ * already exist (including any teacher_corrected_answer) — does not call the
+ * Handwriting AI again. Used both when analysis itself failed and when a
+ * teacher corrects OCR text and wants it re-graded.
+ */
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient();
   const {
@@ -18,7 +23,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "missing submissionId" }, { status: 400 });
   }
 
-  // RLS already scopes this to the caller's own rows; the owner_id check is defense in depth.
   const { data: submission, error: fetchError } = await supabase
     .from("submissions")
     .select("*")
@@ -30,7 +34,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "ไม่พบคำขอตรวจนี้" }, { status: 404 });
   }
 
-  const outcome = await runFullPipeline(supabase, user.id, submission);
+  const outcome = await runAnalysisStage(supabase, submission);
   if (!outcome.ok) {
     return NextResponse.json({ error: outcome.error }, { status: 500 });
   }

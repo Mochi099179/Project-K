@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/supabase/database.types";
-import type { Check, CheckQuestion, CheckStatus, ExerciseFileRef, FileKind, QuestionResult } from "@/lib/types";
+import type { Database, Json } from "@/lib/supabase/database.types";
+import type { Check, CheckOcrResult, CheckQuestion, CheckStatus, ExerciseFileRef, FileKind, QuestionResult } from "@/lib/types";
 import { inferFileKind } from "@/lib/files";
 import { asFileRefList, asStringArray, type StoredFileRef } from "./mappers";
 
@@ -9,6 +9,7 @@ type SubmissionRow = Database["public"]["Tables"]["submissions"]["Row"];
 type QuestionRow = Database["public"]["Tables"]["questions"]["Row"];
 type EvaluationRow = Database["public"]["Tables"]["evaluations"]["Row"];
 type CorrectionRow = Database["public"]["Tables"]["teacher_corrections"]["Row"];
+type OcrResultRow = Database["public"]["Tables"]["ocr_results"]["Row"];
 
 // ----------------------------------------------------------------------------
 // Reconstructing DB rows into the app's Check/CheckQuestion shape. Once built,
@@ -17,15 +18,19 @@ type CorrectionRow = Database["public"]["Tables"]["teacher_corrections"]["Row"];
 // ----------------------------------------------------------------------------
 
 /**
- * The DB's submission_status enum is more granular than the app's CheckStatus
- * (it models every pipeline stage: uploaded/processing/ocr_completed/
- * extracting/evaluating/review_required/completed/failed). The UI only ever
- * needs to distinguish four states, so this collapses the DB enum down.
+ * The DB's submission_status enum is more granular than the app's CheckStatus.
+ * "failed" = a pre-flight validation error (no answer key attached, unreadable
+ * file type) — neither AI stage ever ran. "ocr_failed"/"analysis_failed" mean
+ * exactly one stage failed, so the UI can offer the matching retry action.
  */
 function toCheckStatus(dbStatus: SubmissionRow["status"]): CheckStatus {
   switch (dbStatus) {
     case "failed":
       return "failed";
+    case "ocr_failed":
+      return "ocr_failed";
+    case "analysis_failed":
+      return "analysis_failed";
     case "review_required":
       return "needs_review";
     case "completed":
@@ -44,6 +49,8 @@ function toQuestionResult(evaluation: EvaluationRow): QuestionResult {
     reasoning: evaluation.reasoning,
     areasToImprove: asStringArray(evaluation.areas_to_improve),
     evaluationConfidence: evaluation.evaluation_confidence,
+    needsReview: evaluation.needs_review,
+    reviewReason: evaluation.review_reason,
   };
 }
 
@@ -56,6 +63,22 @@ function toTeacherResult(correction: CorrectionRow): QuestionResult {
     reasoning: correction.corrected_reasoning,
     areasToImprove: asStringArray(correction.corrected_areas_to_improve),
     evaluationConfidence: 1,
+    needsReview: false, // the teacher has already reviewed it — that's what a correction means
+    reviewReason: "",
+  };
+}
+
+function toCheckOcrResult(row: OcrResultRow): CheckOcrResult {
+  const normalized = row.normalized_result as unknown as { pages?: { page_number: number; content: string; confidence?: number | null }[] };
+  return {
+    id: row.id,
+    status: row.status,
+    provider: row.provider,
+    pages: Array.isArray(normalized?.pages)
+      ? normalized.pages.map((p) => ({ pageNumber: p.page_number, content: p.content, confidence: p.confidence ?? null }))
+      : [],
+    teacherCorrectedText: row.teacher_corrected_text,
+    createdAt: row.created_at,
   };
 }
 
@@ -76,10 +99,10 @@ async function exerciseFileRefs(supabase: Client, files: StoredFileRef[]): Promi
 }
 
 /**
- * Fetches questions/evaluations/teacher_corrections for a set of submissions
- * with flat queries (rather than a deeply-nested PostgREST embed) and joins
- * them in memory — more predictable to type and to reason about than relying
- * on embed cardinality inference for the 1:1 / 0-or-1 relations involved.
+ * Fetches questions/evaluations/teacher_corrections/ocr_results for a set of
+ * submissions with flat queries (rather than a deeply-nested PostgREST
+ * embed) and joins them in memory — more predictable to type and reason
+ * about than relying on embed cardinality inference.
  */
 async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Promise<Check[]> {
   if (submissions.length === 0) return [];
@@ -108,6 +131,18 @@ async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Prom
       : await supabase.from("teacher_corrections").select("*").in("evaluation_id", evaluationIds);
   if (cError) throw cError;
 
+  const { data: ocrResults, error: oError } = await supabase
+    .from("ocr_results")
+    .select("*")
+    .in("submission_id", submissionIds)
+    .order("created_at", { ascending: false });
+  if (oError) throw oError;
+
+  const latestOcrBySubmission = new Map<string, OcrResultRow>();
+  for (const row of ocrResults ?? []) {
+    if (!latestOcrBySubmission.has(row.submission_id)) latestOcrBySubmission.set(row.submission_id, row); // already sorted newest-first
+  }
+
   const evaluationByQuestion = new Map((evaluations ?? []).map((e) => [e.question_id, e]));
   const correctionByEvaluation = new Map((corrections ?? []).map((c) => [c.evaluation_id, c]));
   const questionsBySubmission = new Map<string, QuestionRow[]>();
@@ -125,19 +160,32 @@ async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Prom
         const correction = evaluation ? correctionByEvaluation.get(evaluation.id) : undefined;
         return {
           id: q.id,
+          questionNumber: q.question_number,
           question: q.question_text,
           studentAnswer: q.student_answer,
           expectedAnswer: q.expected_answer,
           keywords: asStringArray(q.keywords),
-          features: asStringArray(q.features),
-          context: asStringArray(q.context),
           extractionConfidence: q.extraction_confidence,
+          ocrUncertain: q.ocr_uncertain,
+          ocrAlternatives: asStringArray(q.ocr_alternatives),
           ai: evaluation
             ? toQuestionResult(evaluation)
-            : { isCorrect: false, score: 0, errorType: "", conceptIssue: "", reasoning: "", areasToImprove: [], evaluationConfidence: 0 },
+            : {
+                isCorrect: false,
+                score: 0,
+                errorType: "",
+                conceptIssue: "",
+                reasoning: "",
+                areasToImprove: [],
+                evaluationConfidence: 0,
+                needsReview: true,
+                reviewReason: "ยังไม่มีผลวิเคราะห์สำหรับข้อนี้",
+              },
           teacherCorrected: correction ? toTeacherResult(correction) : null,
         };
       });
+
+      const ocrRow = latestOcrBySubmission.get(s.id);
 
       return {
         id: s.id,
@@ -146,6 +194,7 @@ async function buildChecks(supabase: Client, submissions: SubmissionRow[]): Prom
         studentLabel: s.student_code,
         topic: s.topic ?? undefined,
         exerciseFiles: await exerciseFileRefs(supabase, asFileRefList(s.exercise_files)),
+        ocrResult: ocrRow ? toCheckOcrResult(ocrRow) : null,
         questions: mappedQuestions,
         overallScore: s.overall_score ?? 0,
         errorMessage: s.error_message ?? undefined,
@@ -195,6 +244,13 @@ export async function getSubmission(supabase: Client, id: string): Promise<Check
   if (!data) return null;
   const [check] = await buildChecks(supabase, [data]);
   return check ?? null;
+}
+
+/** Server-side only: fetches the raw submission row (pipeline stages need fields buildChecks doesn't expose). */
+export async function getSubmissionRow(supabase: Client, id: string): Promise<SubmissionRow | null> {
+  const { data, error } = await supabase.from("submissions").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ?? null;
 }
 
 // ----------------------------------------------------------------------------
@@ -249,69 +305,10 @@ export async function createSubmissionShell(
   if (error) throw error;
 }
 
-export type InsertableQuestion = {
-  question_number: number;
-  question_text: string;
-  student_answer: string;
-  expected_answer: string;
-  keywords: string[];
-  features: string[];
-  context: string[];
-  extraction_confidence: number;
-  is_correct: boolean;
-  score: number;
-  error_type: string;
-  concept_issue: string;
-  reasoning: string;
-  areas_to_improve: string[];
-  evaluation_confidence: number;
-};
-
-/** Server-side only: writes the AI pipeline's output. Called once per submission. */
-export async function insertQuestionsAndEvaluations(
-  supabase: Client,
-  submissionId: string,
-  questions: InsertableQuestion[]
-): Promise<void> {
-  const { data: insertedQuestions, error: qError } = await supabase
-    .from("questions")
-    .insert(
-      questions.map((q) => ({
-        submission_id: submissionId,
-        question_number: q.question_number,
-        question_text: q.question_text,
-        student_answer: q.student_answer,
-        expected_answer: q.expected_answer,
-        keywords: q.keywords as unknown as Database["public"]["Tables"]["questions"]["Insert"]["keywords"],
-        features: q.features as unknown as Database["public"]["Tables"]["questions"]["Insert"]["features"],
-        context: q.context as unknown as Database["public"]["Tables"]["questions"]["Insert"]["context"],
-        extraction_confidence: q.extraction_confidence,
-      }))
-    )
-    .select("id, question_number");
-  if (qError) throw qError;
-
-  const byNumber = new Map((insertedQuestions ?? []).map((q) => [q.question_number, q.id]));
-
-  const { error: eError } = await supabase.from("evaluations").insert(
-    questions.map((q) => ({
-      question_id: byNumber.get(q.question_number)!,
-      is_correct: q.is_correct,
-      score: q.score,
-      error_type: q.error_type,
-      concept_issue: q.concept_issue,
-      reasoning: q.reasoning,
-      areas_to_improve: q.areas_to_improve as unknown as Database["public"]["Tables"]["evaluations"]["Insert"]["areas_to_improve"],
-      evaluation_confidence: q.evaluation_confidence,
-    }))
-  );
-  if (eError) throw eError;
-}
-
 export async function updateSubmissionStatus(
   supabase: Client,
   id: string,
-  patch: { status: Database["public"]["Tables"]["submissions"]["Row"]["status"]; overallScore?: number; errorMessage?: string }
+  patch: { status: SubmissionRow["status"]; overallScore?: number; errorMessage?: string }
 ): Promise<void> {
   const { error } = await supabase
     .from("submissions")
@@ -346,6 +343,7 @@ export async function linkSubmissionToProfile(
     .eq("id", submissionId);
   if (error) throw error;
 }
+
 /** 0-or-1 correction per evaluation (unique constraint) — upsert, not insert. */
 export async function upsertTeacherCorrection(
   supabase: Client,
@@ -374,4 +372,130 @@ export async function getEvaluationIdForQuestion(supabase: Client, questionId: s
   const { data, error } = await supabase.from("evaluations").select("id").eq("question_id", questionId).maybeSingle();
   if (error) throw error;
   return data?.id ?? null;
+}
+
+// ----------------------------------------------------------------------------
+// STAGE 1 — Handwriting recognition (OCR) writes. Never writes `questions` —
+// a generic OCR provider doesn't know question boundaries, so there's
+// nothing question-shaped to persist yet at this stage.
+// ----------------------------------------------------------------------------
+
+export async function insertOcrResult(
+  supabase: Client,
+  input: {
+    submissionId: string;
+    ownerId: string;
+    provider: string;
+    model: string;
+    rawResponse: unknown;
+    normalizedResult: unknown;
+    status: "completed" | "failed";
+    errorMessage?: string;
+  }
+): Promise<void> {
+  const { error } = await supabase.from("ocr_results").insert({
+    submission_id: input.submissionId,
+    owner_id: input.ownerId,
+    provider: input.provider,
+    model: input.model,
+    raw_response: input.rawResponse as Json,
+    normalized_result: input.normalizedResult as Json,
+    status: input.status,
+    error_message: input.errorMessage ?? null,
+  });
+  if (error) throw error;
+}
+
+/** The most recent OCR attempt for a submission (retries insert a new row rather than overwrite, so history is preserved). */
+export async function getLatestOcrResult(supabase: Client, submissionId: string): Promise<OcrResultRow | null> {
+  const { data, error } = await supabase
+    .from("ocr_results")
+    .select("*")
+    .eq("submission_id", submissionId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
+}
+
+/** Teacher's correction of the OCR reading (all pages combined). null clears it, falling back to the raw OCR text. */
+export async function updateOcrCorrectedText(supabase: Client, ocrResultId: string, correctedText: string | null): Promise<void> {
+  const { error } = await supabase.from("ocr_results").update({ teacher_corrected_text: correctedText }).eq("id", ocrResultId);
+  if (error) throw error;
+}
+
+// ----------------------------------------------------------------------------
+// STAGE 2 — Answer analysis writes. Segments AND grades in one pass, so
+// `questions` and `evaluations` are written together here.
+// ----------------------------------------------------------------------------
+
+export type InsertableAnalysisQuestion = {
+  question_number: number;
+  question_text: string;
+  student_answer: string;
+  expected_answer: string;
+  keywords: string[];
+  extraction_confidence: number;
+  ocr_uncertain: boolean;
+  ocr_alternatives: string[];
+  is_correct: boolean;
+  score: number;
+  error_type: string;
+  concept_issue: string;
+  reasoning: string;
+  areas_to_improve: string[];
+  evaluation_confidence: number;
+  needs_review: boolean;
+  review_reason: string;
+};
+
+/**
+ * Replaces every `questions` (and therefore `evaluations`/corrections, via
+ * cascade) row for a submission with fresh Answer Analysis output — safe on
+ * both the first analysis pass and a retry.
+ */
+export async function replaceQuestionsWithAnalysis(
+  supabase: Client,
+  submissionId: string,
+  questions: InsertableAnalysisQuestion[]
+): Promise<void> {
+  const { error: deleteError } = await supabase.from("questions").delete().eq("submission_id", submissionId);
+  if (deleteError) throw deleteError;
+
+  // Ids are generated here (not left to the DB) so evaluations can be linked
+  // to their question in the same batch without a second round-trip.
+  const withIds = questions.map((q) => ({ id: crypto.randomUUID(), ...q }));
+
+  const { error: qError } = await supabase.from("questions").insert(
+    withIds.map((q) => ({
+      id: q.id,
+      submission_id: submissionId,
+      question_number: q.question_number,
+      question_text: q.question_text,
+      student_answer: q.student_answer,
+      expected_answer: q.expected_answer,
+      keywords: q.keywords as unknown as Database["public"]["Tables"]["questions"]["Insert"]["keywords"],
+      extraction_confidence: q.extraction_confidence,
+      ocr_uncertain: q.ocr_uncertain,
+      ocr_alternatives: q.ocr_alternatives as unknown as Database["public"]["Tables"]["questions"]["Insert"]["ocr_alternatives"],
+    }))
+  );
+  if (qError) throw qError;
+
+  const { error: eError } = await supabase.from("evaluations").insert(
+    withIds.map((q) => ({
+      question_id: q.id,
+      is_correct: q.is_correct,
+      score: q.score,
+      error_type: q.error_type,
+      concept_issue: q.concept_issue,
+      reasoning: q.reasoning,
+      areas_to_improve: q.areas_to_improve as unknown as Database["public"]["Tables"]["evaluations"]["Insert"]["areas_to_improve"],
+      evaluation_confidence: q.evaluation_confidence,
+      needs_review: q.needs_review,
+      review_reason: q.review_reason,
+    }))
+  );
+  if (eError) throw eError;
 }

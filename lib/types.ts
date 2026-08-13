@@ -113,7 +113,7 @@ export type FileRef = {
   addedAt: string;
 };
 
-/** A single question/answer evaluation. AI-produced, and optionally teacher-corrected. */
+/** A single question/answer evaluation. AI-produced (by Answer Analysis), and optionally teacher-corrected. */
 export type QuestionResult = {
   isCorrect: boolean;
   score: number; // 0-1, normalized per-question score
@@ -122,26 +122,48 @@ export type QuestionResult = {
   reasoning: string;
   areasToImprove: string[];
   evaluationConfidence: number; // 0-1 — how confident AI is in this evaluation
+  needsReview: boolean; // true when the underlying OCR was too uncertain to grade with confidence
+  reviewReason: string;
 };
 
-/** Question and answer stay in the same block, per spec — never split apart. */
+/**
+ * Question and answer stay in the same block, per spec — never split apart.
+ * Written entirely by Answer Analysis (which segments OCR text into
+ * questions AND grades them in one pass) — a generic OCR provider has no
+ * concept of question boundaries, so there's no separate "OCR's version"
+ * of a question to preserve here. Reviewing/correcting the OCR reading
+ * itself happens one level up, on Check.ocrResult.
+ */
 export type CheckQuestion = {
   id: string;
+  questionNumber: number | null;
   question: string;
-  studentAnswer: string;
+  studentAnswer: string; // the portion of the OCR text Answer Analysis identified as this question's answer
   expectedAnswer: string;
   keywords: string[];
-  features: string[];
-  context: string[];
-  extractionConfidence: number; // 0-1 — how confident OCR/extraction is that Q&A was parsed correctly
+  extractionConfidence: number; // 0-1 — how confident Answer Analysis is that this OCR text maps to this question and was read correctly
+  ocrUncertain: boolean;
+  ocrAlternatives: string[]; // alternate readings considered, when uncertain
   ai: QuestionResult;
   teacherCorrected: QuestionResult | null;
 };
 
-export type CheckStatus = "processing" | "failed" | "needs_review" | "reviewed";
+export type CheckStatus = "processing" | "failed" | "ocr_failed" | "analysis_failed" | "needs_review" | "reviewed";
 
 /** One attached page of student work — image, PDF, or text file — for the left-panel document viewer. */
 export type ExerciseFileRef = { url: string; name: string; kind: FileKind };
+
+export type CheckOcrPage = { pageNumber: number; content: string; confidence: number | null };
+
+/** The Handwriting AI's raw reading of the student's work — page-level text, not yet segmented into questions. */
+export type CheckOcrResult = {
+  id: string;
+  status: "completed" | "failed";
+  provider: string;
+  pages: CheckOcrPage[];
+  teacherCorrectedText: string | null; // when set, this (not `pages`) is what Answer Analysis grades against
+  createdAt: string;
+};
 
 /** A Check (Submission) links a student's work to AI evaluation and (optionally) a Classroom + Student. */
 export type Check = {
@@ -151,6 +173,7 @@ export type Check = {
   studentLabel: string; // Student ID as entered in Quick Check, or the bound student's studentId
   topic?: string;
   exerciseFiles: ExerciseFileRef[]; // pages of the student's submitted work, for the left-panel document viewer
+  ocrResult: CheckOcrResult | null;
   questions: CheckQuestion[];
   overallScore: number; // 0-100, derived from final (teacher-corrected if present, else AI) results
   errorMessage?: string;

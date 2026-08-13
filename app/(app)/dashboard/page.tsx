@@ -117,10 +117,20 @@ export default function DashboardPage() {
                     </div>
                     <div className="text-[10.5px] text-ink/50">
                       {new Date(c.createdAt).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" })} ·{" "}
-                      {c.status === "processing" ? "กำลังตรวจ..." : c.status === "failed" ? "ตรวจไม่สำเร็จ" : c.status === "needs_review" ? "รอตรวจสอบ" : "ตรวจสอบแล้ว"}
+                      {c.status === "processing"
+                        ? "กำลังตรวจ..."
+                        : c.status === "failed"
+                          ? "ตรวจไม่สำเร็จ"
+                          : c.status === "ocr_failed"
+                            ? "อ่านลายมือไม่สำเร็จ"
+                            : c.status === "analysis_failed"
+                              ? "วิเคราะห์คำตอบไม่สำเร็จ"
+                              : c.status === "needs_review"
+                                ? "รอตรวจสอบ"
+                                : "ตรวจสอบแล้ว"}
                     </div>
                   </div>
-                  {c.status !== "processing" && c.status !== "failed" && (
+                  {c.status !== "processing" && c.status !== "failed" && c.status !== "ocr_failed" && c.status !== "analysis_failed" && (
                     <span className="flex-shrink-0 text-[13px] font-bold text-primary">{c.overallScore}%</span>
                   )}
                 </Link>

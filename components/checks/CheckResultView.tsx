@@ -7,27 +7,56 @@ import { finalQuestionResult } from "@/lib/types";
 import { useAppData } from "@/lib/store";
 import { Card } from "@/components/ui/Card";
 import { ExerciseViewer } from "./ExerciseViewer";
+import { OcrResultCollapsible } from "./OcrResultCollapsible";
 import { QuestionCard } from "./QuestionCard";
 import { SendToProfileModal } from "./SendToProfileModal";
 import { ProcessingView } from "@/components/quickcheck/ProcessingView";
 
 export function CheckResultView({ check }: { check: Check }) {
-  const { correctQuestion, markReviewed, saveCheckToProfile, getClassroom, getStudent } = useAppData();
+  const { correctQuestion, correctOcrText, retryOcr, retryAnalysis, markReviewed, saveCheckToProfile, getClassroom, getStudent } =
+    useAppData();
   const [showSendModal, setShowSendModal] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   if (check.status === "processing") {
     return <ProcessingView />;
   }
 
-  if (check.status === "failed") {
+  async function handleRetry(kind: "ocr" | "analysis") {
+    setRetrying(true);
+    try {
+      await (kind === "ocr" ? retryOcr(check.id) : retryAnalysis(check.id));
+    } catch {
+      showToast(kind === "ocr" ? "อ่านลายมือใหม่ไม่สำเร็จ กรุณาลองใหม่" : "วิเคราะห์คำตอบใหม่ไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }
+
+  // "failed" = a pre-flight validation error (e.g. no answer key attached) —
+  // neither AI stage ran, so the only sensible restart point is OCR.
+  if (check.status === "failed" || check.status === "ocr_failed") {
     return (
       <Card className="mx-auto max-w-[480px] rounded-[1.75rem] p-8 text-center">
         <div className="mb-3 text-3xl">⚠️</div>
-        <h2 className="mb-2 text-lg font-bold text-ink">ตรวจไม่สำเร็จ</h2>
-        <p className="text-[13px] leading-[1.6] text-ink/55">
+        <h2 className="mb-2 text-lg font-bold text-ink">{check.status === "ocr_failed" ? "อ่านลายมือไม่สำเร็จ" : "ตรวจไม่สำเร็จ"}</h2>
+        <p className="mb-5 text-[13px] leading-[1.6] text-ink/55">
           {check.errorMessage || "เกิดข้อผิดพลาดบางอย่างระหว่างตรวจ กรุณาลองใหม่อีกครั้ง"}
         </p>
+        <button
+          onClick={() => handleRetry("ocr")}
+          disabled={retrying}
+          className="rounded-full bg-primary px-6 py-2.5 text-[13px] font-bold text-card disabled:opacity-50"
+        >
+          {retrying ? "กำลังอ่านลายมือใหม่..." : "↻ ลองอ่านลายมือใหม่"}
+        </button>
+        {toast && <p className="mt-3 text-[12px] text-[#BB6B53]">{toast}</p>}
       </Card>
     );
   }
@@ -40,11 +69,6 @@ export function CheckResultView({ check }: { check: Check }) {
   const incorrect = check.questions.filter((q) => !finalQuestionResult(q).isCorrect);
   const areasToImprove = Array.from(new Set(incorrect.flatMap((q) => finalQuestionResult(q).areasToImprove))).slice(0, 6);
   const errorTypes = Array.from(new Set(incorrect.map((q) => finalQuestionResult(q).errorType).filter(Boolean)));
-
-  function showToast(msg: string) {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2500);
-  }
 
   async function handleSave() {
     try {
@@ -117,6 +141,24 @@ export function CheckResultView({ check }: { check: Check }) {
         </Card>
 
         <div className="flex flex-col gap-4">
+          {check.ocrResult && (
+            // Reaching this branch at all means OCR already succeeded — the
+            // "processing"/"error" OCR statuses are handled by the earlier
+            // full-page states above (ProcessingView / the ocr_failed card),
+            // so "completed" is the only status reachable here. Collapsed by
+            // default (OcrResultCollapsible's own state) — this view is a
+            // secondary verification layer; AI Analysis below is the
+            // teacher's primary result and is never gated behind it.
+            <OcrResultCollapsible
+              status="completed"
+              ocrResult={check.ocrResult}
+              disabled={check.status === "reviewed"}
+              onCorrect={(correctedText) => {
+                correctOcrText(check.id, correctedText).catch(() => showToast("แก้ไขข้อความไม่สำเร็จ กรุณาลองใหม่"));
+              }}
+            />
+          )}
+
           <Card className="rounded-[1.75rem] p-5.5">
             <div className="mb-3 font-mono text-[10px] uppercase tracking-wide text-ink/45">AI Analysis</div>
 
@@ -164,19 +206,35 @@ export function CheckResultView({ check }: { check: Check }) {
       {/* CTA bar */}
       <div className="sticky bottom-4 z-20 mt-5 flex items-center justify-between gap-3 rounded-2xl border border-border bg-card/95 px-5 py-3.5 backdrop-blur-md">
         <div className="text-[12px] text-ink/50">
-          {check.status === "reviewed" ? "ครูตรวจสอบผลแล้ว" : "AI ตรวจให้เบื้องต้น — กรุณาตรวจสอบก่อนบันทึก"}
+          {check.status === "analysis_failed"
+            ? check.errorMessage || "วิเคราะห์คำตอบไม่สำเร็จ — อ่านลายมือสำเร็จแล้ว ลองวิเคราะห์ใหม่ได้โดยไม่ต้องอ่านลายมือซ้ำ"
+            : check.status === "reviewed"
+              ? "ครูตรวจสอบผลแล้ว"
+              : "AI ตรวจให้เบื้องต้น — กรุณาตรวจสอบก่อนบันทึก"}
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={handleSave} className="rounded-full border border-primary/40 bg-primary/10 px-5 py-2.5 text-[12.5px] font-semibold text-primary-dark">
-            บันทึก
-          </button>
-          <button
-            onClick={handleSendClick}
-            disabled={!!check.savedToProfile}
-            className="rounded-full bg-primary px-6 py-2.5 text-[12.5px] font-bold text-card disabled:opacity-60"
-          >
-            {check.savedToProfile ? "✓ ส่งเข้า Student Profile แล้ว" : "ส่งเข้า Student Profile →"}
-          </button>
+          {check.status === "analysis_failed" ? (
+            <button
+              onClick={() => handleRetry("analysis")}
+              disabled={retrying}
+              className="rounded-full bg-primary px-6 py-2.5 text-[12.5px] font-bold text-card disabled:opacity-50"
+            >
+              {retrying ? "กำลังวิเคราะห์..." : "↻ ลองวิเคราะห์ใหม่"}
+            </button>
+          ) : (
+            <>
+              <button onClick={handleSave} className="rounded-full border border-primary/40 bg-primary/10 px-5 py-2.5 text-[12.5px] font-semibold text-primary-dark">
+                บันทึก
+              </button>
+              <button
+                onClick={handleSendClick}
+                disabled={!!check.savedToProfile}
+                className="rounded-full bg-primary px-6 py-2.5 text-[12.5px] font-bold text-card disabled:opacity-60"
+              >
+                {check.savedToProfile ? "✓ ส่งเข้า Student Profile แล้ว" : "ส่งเข้า Student Profile →"}
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -204,7 +262,9 @@ function StatusPill({ status }: { status: Check["status"] }) {
   const meta =
     status === "reviewed"
       ? { label: "✓ ตรวจสอบแล้ว", bg: "rgba(109,151,115,0.15)", color: "#5b8060" }
-      : { label: "รอครูตรวจสอบ", bg: "rgba(216,183,95,0.2)", color: "#a8823a" };
+      : status === "analysis_failed"
+        ? { label: "วิเคราะห์คำตอบไม่สำเร็จ", bg: "rgba(187,107,83,0.15)", color: "#BB6B53" }
+        : { label: "รอครูตรวจสอบ", bg: "rgba(216,183,95,0.2)", color: "#a8823a" };
   return (
     <span className="rounded-full px-2.5 py-1 text-[10.5px] font-semibold" style={{ background: meta.bg, color: meta.color }}>
       {meta.label}
