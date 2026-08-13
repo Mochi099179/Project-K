@@ -42,7 +42,12 @@ function mapExercise(row: ExerciseRow, answerKey: AnswerKeyRow | undefined): Exe
   };
 }
 
-type UnitWithRelations = UnitRow & { homework_unit_files: FileRow[]; exercises: (ExerciseRow & { answer_keys: AnswerKeyRow[] })[] };
+// answer_keys.exercise_id is unique, so PostgREST embeds it as a single
+// object (or null) — not an array — when queried from the exercises side.
+type UnitWithRelations = UnitRow & {
+  homework_unit_files: FileRow[];
+  exercises: (ExerciseRow & { answer_keys: AnswerKeyRow | null })[];
+};
 
 function mapHomeworkUnit(row: UnitWithRelations): HomeworkUnit {
   const { homework_unit_files, exercises, ...unitRow } = row;
@@ -53,7 +58,7 @@ function mapHomeworkUnit(row: UnitWithRelations): HomeworkUnit {
     grade: unitRow.grade ?? "-",
     createdAt: unitRow.created_at,
     exercises: (exercises ?? [])
-      .map((e) => mapExercise(e, e.answer_keys?.[0]))
+      .map((e) => mapExercise(e, e.answer_keys ?? undefined))
       .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1)),
     teachingMaterials: (homework_unit_files ?? [])
       .filter((f) => f.group_type === "material")
@@ -190,8 +195,8 @@ export async function getExerciseWithAnswerKey(supabase: Client, exerciseId: str
   const { data, error } = await supabase.from("exercises").select("*, answer_keys(*)").eq("id", exerciseId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  const { answer_keys, ...row } = data as ExerciseRow & { answer_keys: AnswerKeyRow[] };
-  return mapExercise(row, answer_keys?.[0]);
+  const { answer_keys, ...row } = data as ExerciseRow & { answer_keys: AnswerKeyRow | null };
+  return mapExercise(row, answer_keys ?? undefined);
 }
 
 /** Server-side: a Homework Unit's Teaching Materials, for AI context when checking against one of its Exercises. */
@@ -216,7 +221,7 @@ export async function deleteExercise(supabase: Client, exerciseId: string): Prom
   if (exercise?.exercise_file_path) {
     await supabase.storage.from("exercises").remove([exercise.exercise_file_path]);
   }
-  const answerKeyPath = (exercise?.answer_keys as { file_path: string | null }[] | null)?.[0]?.file_path;
+  const answerKeyPath = (exercise?.answer_keys as { file_path: string | null } | null)?.file_path;
   if (answerKeyPath) {
     await supabase.storage.from("answer-keys").remove([answerKeyPath]);
   }
@@ -240,12 +245,13 @@ export async function deleteHomeworkUnit(supabase: Client, unitId: string): Prom
     await supabase.storage.from("teaching-materials").remove(materialPaths);
   }
 
-  const exerciseRows = (unit?.exercises as { exercise_file_path: string | null; answer_keys: { file_path: string | null }[] }[] | null) ?? [];
+  const exerciseRows =
+    (unit?.exercises as { exercise_file_path: string | null; answer_keys: { file_path: string | null } | null }[] | null) ?? [];
   const exerciseFilePaths = exerciseRows.map((e) => e.exercise_file_path).filter((p): p is string => !!p);
   if (exerciseFilePaths.length) {
     await supabase.storage.from("exercises").remove(exerciseFilePaths);
   }
-  const answerKeyPaths = exerciseRows.flatMap((e) => e.answer_keys.map((a) => a.file_path)).filter((p): p is string => !!p);
+  const answerKeyPaths = exerciseRows.map((e) => e.answer_keys?.file_path).filter((p): p is string => !!p);
   if (answerKeyPaths.length) {
     await supabase.storage.from("answer-keys").remove(answerKeyPaths);
   }
