@@ -1,18 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAppData } from "@/lib/store";
 import { BreadcrumbBar } from "@/components/layout/BreadcrumbBar";
 import { FileList } from "@/components/homeworkunit/FileList";
 import { ExerciseList } from "@/components/homeworkunit/ExerciseList";
 
+const OCR_POLL_INTERVAL_MS = 4_000;
+
 export default function HomeworkUnitDetailPage() {
   const params = useParams<{ unitId: string }>();
   const router = useRouter();
-  const { getHomeworkUnit, addFileToUnit, deleteHomeworkUnit } = useAppData();
+  const { getHomeworkUnit, addFileToUnit, deleteHomeworkUnit, refreshHomeworkUnit } = useAppData();
   const unit = getHomeworkUnit(params.unitId);
   const [deleting, setDeleting] = useState(false);
+
+  // Light polling while any reference file's OCR cache is still being
+  // filled in the background — stops itself once nothing is left pending.
+  // Scoped to this page only; no app-wide polling/Realtime infra exists yet.
+  useEffect(() => {
+    if (!unit) return;
+    const statuses = [
+      ...unit.exercises.flatMap((e) => [e.exerciseFileOcrStatus, e.answerKey?.ocrStatus ?? null]),
+      ...unit.teachingMaterials.map((m) => m.ocrStatus),
+    ];
+    const hasPending = statuses.some((s) => s === "pending" || s === "processing");
+    if (!hasPending) return;
+    const timer = setTimeout(() => void refreshHomeworkUnit(unit.id), OCR_POLL_INTERVAL_MS);
+    return () => clearTimeout(timer);
+  }, [unit, refreshHomeworkUnit]);
 
   async function handleDeleteUnit() {
     if (!unit || !confirm(`ลบ Homework Unit "${unit.name}"? แบบฝึกหัด เฉลย และสื่อการสอนทั้งหมดในชุดนี้จะถูกลบด้วย`)) return;
@@ -72,6 +89,7 @@ export default function HomeworkUnitDetailPage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           <ExerciseList homeworkUnitId={unit.id} exercises={unit.exercises} />
           <FileList
+            homeworkUnitId={unit.id}
             title="Teaching Materials"
             description="สื่อ/เอกสารประกอบการสอน"
             files={unit.teachingMaterials}

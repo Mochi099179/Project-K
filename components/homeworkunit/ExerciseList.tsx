@@ -1,15 +1,16 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { Exercise } from "@/lib/types";
+import type { Exercise, ReferenceFileOcrStatus } from "@/lib/types";
 import { useAppData } from "@/lib/store";
 import { inferFileKind } from "@/lib/files";
 import { Card } from "@/components/ui/Card";
 
 export function ExerciseList({ homeworkUnitId, exercises }: { homeworkUnitId: string; exercises: Exercise[] }) {
-  const { deleteExercise } = useAppData();
+  const { deleteExercise, retryExerciseOcr } = useAppData();
   const [showCreate, setShowCreate] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   async function handleDelete(id: string) {
     if (!confirm("ลบแบบฝึกหัดนี้? ไฟล์เฉลยและไฟล์แบบฝึกหัดที่แนบไว้จะถูกลบด้วย")) return;
@@ -18,6 +19,15 @@ export function ExerciseList({ homeworkUnitId, exercises }: { homeworkUnitId: st
       await deleteExercise(homeworkUnitId, id);
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleRetryOcr(id: string) {
+    setRetryingId(id);
+    try {
+      await retryExerciseOcr(homeworkUnitId, id);
+    } finally {
+      setRetryingId(null);
     }
   }
 
@@ -53,10 +63,19 @@ export function ExerciseList({ homeworkUnitId, exercises }: { homeworkUnitId: st
                   {deletingId === ex.id ? "กำลังลบ..." : "ลบ"}
                 </button>
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                <Badge ok={!!ex.exerciseFilePath} label="ไฟล์แบบฝึกหัด" />
-                <Badge ok={!!ex.answerKey} label="เฉลย" />
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge ok={!!ex.exerciseFilePath} label="ไฟล์แบบฝึกหัด" ocrStatus={ex.exerciseFilePath ? ex.exerciseFileOcrStatus : null} />
+                <Badge ok={!!ex.answerKey} label="เฉลย" ocrStatus={ex.answerKey?.filePath ? ex.answerKey.ocrStatus : null} />
                 <Badge ok={!!ex.scoringCriteria} label="เกณฑ์การให้คะแนน" />
+                {(ex.exerciseFileOcrStatus === "failed" || ex.answerKey?.ocrStatus === "failed") && (
+                  <button
+                    onClick={() => handleRetryOcr(ex.id)}
+                    disabled={retryingId === ex.id}
+                    className="text-[10.5px] font-semibold text-[#BB6B53] underline disabled:opacity-40"
+                  >
+                    {retryingId === ex.id ? "กำลังลองใหม่..." : "ลองอ่านไฟล์อีกครั้ง"}
+                  </button>
+                )}
               </div>
               {ex.scoringCriteria && <p className="mt-2 text-[11px] leading-[1.5] text-ink/55">{ex.scoringCriteria}</p>}
             </div>
@@ -69,14 +88,20 @@ export function ExerciseList({ homeworkUnitId, exercises }: { homeworkUnitId: st
   );
 }
 
-function Badge({ ok, label }: { ok: boolean; label: string }) {
+function Badge({ ok, label, ocrStatus }: { ok: boolean; label: string; ocrStatus?: ReferenceFileOcrStatus | null }) {
+  const isReading = ocrStatus === "pending" || ocrStatus === "processing";
+  const failed = ocrStatus === "failed";
   return (
     <span
       className={`rounded-full px-2.5 py-1 text-[10.5px] font-semibold ${
-        ok ? "bg-primary/12 text-primary-dark" : "border border-dashed border-border text-ink/35"
+        failed
+          ? "bg-[#BB6B53]/12 text-[#BB6B53]"
+          : ok
+            ? "bg-primary/12 text-primary-dark"
+            : "border border-dashed border-border text-ink/35"
       }`}
     >
-      {ok ? "✓" : "—"} {label}
+      {failed ? "⚠️" : isReading ? "⏳" : ok ? "✓" : "—"} {label}
     </span>
   );
 }

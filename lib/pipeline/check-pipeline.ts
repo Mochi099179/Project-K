@@ -2,9 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import type { Database } from "@/lib/supabase/database.types";
 import { buildCheckingContext } from "./check-context";
-import { recognizeHandwriting } from "@/lib/ai/handwriting";
+import { recognizeHandwriting } from "@/lib/ai/ocr";
 import { analyzeAnswers } from "@/lib/ai/answer-analysis";
-import type { UploadedFile } from "@/lib/ai/content-blocks";
+import { batchUploadedFiles, joinOcrPages } from "@/lib/ai/batching";
 import type { OcrPage } from "@/lib/validation/ai-result";
 import {
   getSubmissionRow,
@@ -23,52 +23,6 @@ export type StageOutcome = { ok: true } | { ok: false; error: string };
 const handwritingProvider = () => process.env.HANDWRITING_AI_PROVIDER || "anthropic";
 const handwritingModel = () => process.env.HANDWRITING_AI_MODEL || "claude-sonnet-5";
 
-// Mirrors STUDENT_IMAGES_TOTAL_BUDGET in check-context.ts. That budget keeps
-// each image's SIZE bounded, but with few enough total pages each image can
-// still use up to its 1.5MB per-image cap — so a request built from many
-// such pages could still combine into something larger than intended. This
-// is the second half of "handle any size of file": group the (already
-// compressed) pages into separate OCR requests by actual encoded size, not
-// by a fixed page count, so a submission of any length gets split into
-// however many requests it takes to stay under budget, then the per-page
-// results are merged back into one ocr_results row.
-const OCR_REQUEST_BYTE_BUDGET = 6 * 1024 * 1024;
-
-// A second, independent cap on the same batches: with enough pages
-// compressed down near the per-image budget floor, OCR_REQUEST_BYTE_BUDGET
-// alone would still let a batch grow to 100+ pages — fine for the input
-// side, but recognizeHandwriting's max_tokens (scaled per page, see
-// handwriting.ts) would then need an output budget large enough to transcribe
-// all of them in one response. Capping page count keeps that scaling bounded
-// regardless of how small the compressed pages turned out to be.
-const MAX_PAGES_PER_BATCH = 20;
-
-function estimateUploadedFileBytes(file: UploadedFile): number {
-  if (file.file.kind === "image") return Math.ceil(file.file.base64.length * 0.75);
-  if (file.file.kind === "text") return file.file.text.length;
-  return 0;
-}
-
-/** A single file larger than the byte budget still becomes its own (solo) batch — it's already as small as compressImage could make it. */
-function batchStudentWorkFiles(files: UploadedFile[]): UploadedFile[][] {
-  const batches: UploadedFile[][] = [];
-  let current: UploadedFile[] = [];
-  let currentBytes = 0;
-  for (const file of files) {
-    const bytes = estimateUploadedFileBytes(file);
-    const wouldOverflow = current.length > 0 && (currentBytes + bytes > OCR_REQUEST_BYTE_BUDGET || current.length >= MAX_PAGES_PER_BATCH);
-    if (wouldOverflow) {
-      batches.push(current);
-      current = [];
-      currentBytes = 0;
-    }
-    current.push(file);
-    currentBytes += bytes;
-  }
-  if (current.length > 0) batches.push(current);
-  return batches;
-}
-
 /** Translates the AI SDK's own error shapes into a message a teacher can act on, when we recognize the cause. */
 function friendlyAiErrorMessage(err: unknown): string | null {
   if (!(err instanceof Anthropic.APIError)) return null;
@@ -79,13 +33,6 @@ function friendlyAiErrorMessage(err: unknown): string | null {
     return "ระบบ AI มีคำขอเข้ามาเยอะในขณะนี้ กรุณาลองใหม่อีกครั้งในอีกสักครู่";
   }
   return null;
-}
-
-function joinOcrPages(pages: { page_number: number; content: string }[]): string {
-  return [...pages]
-    .sort((a, b) => a.page_number - b.page_number)
-    .map((p) => `[หน้า ${p.page_number}]\n${p.content}`)
-    .join("\n\n");
 }
 
 /**
@@ -106,10 +53,10 @@ export async function runOcrStage(supabase: Client, ownerId: string, submission:
 
   try {
     // 1 file = 1 page is the contract recognizeHandwriting's prompt relies on
-    // (see lib/ai/handwriting.ts) — batching must preserve that within each
+    // (see lib/ai/ocr.ts) — batching must preserve that within each
     // request while still producing sequential page numbers across ALL of
     // them once merged, hence the running offset below.
-    const batches = batchStudentWorkFiles(context.studentWorkFiles);
+    const batches = batchUploadedFiles(context.studentWorkFiles);
     let pageOffset = 0;
     const mergedPages: OcrPage[] = [];
     const rawResponses: unknown[] = [];
@@ -196,6 +143,7 @@ export async function runAnalysisStage(supabase: Client, submission: SubmissionR
       answerKeyBlock: context.answerKeyBlock,
       answerKeyText: context.answerKeyText,
       scoringCriteria: context.scoringCriteria,
+      materialsText: context.materialsText,
       contextLines: context.contextLines,
     });
 

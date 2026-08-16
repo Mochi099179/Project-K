@@ -89,6 +89,9 @@ type AppDataContextValue = {
   createExercise: (homeworkUnitId: string, input: CreateExerciseInput) => Promise<string>;
   deleteExercise: (homeworkUnitId: string, exerciseId: string) => Promise<void>;
   deleteHomeworkUnit: (unitId: string) => Promise<void>;
+  retryExerciseOcr: (homeworkUnitId: string, exerciseId: string) => Promise<void>;
+  retryMaterialOcr: (homeworkUnitId: string, materialId: string) => Promise<void>;
+  refreshHomeworkUnit: (unitId: string) => Promise<void>;
 };
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
@@ -409,7 +412,15 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     async (unitId: string, file: File, kind: FileKind) => {
       if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
       const supabase = getSupabaseBrowserClient();
-      await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, "material", file, kind);
+      const materialId = await homeworkUnitsApi.addFileToHomeworkUnit(supabase, userId, unitId, "material", file, kind);
+      // Fire-and-forget: the upload is already done from the teacher's
+      // perspective, OCR just fills in the cache in the background — not
+      // awaited, and a failure here is non-fatal (the retry button covers it).
+      void fetch("/api/material-ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ materialId }),
+      }).catch((err) => console.error("[material-ocr] trigger failed:", err));
       const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, unitId);
       if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === unitId ? fresh : u)));
     },
@@ -421,6 +432,14 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (!userId) throw new Error("กรุณาเข้าสู่ระบบ");
       const supabase = getSupabaseBrowserClient();
       const id = await homeworkUnitsApi.createExercise(supabase, userId, homeworkUnitId, input);
+      // Same fire-and-forget trigger as addFileToUnit — only worth calling when a file was actually attached.
+      if (input.exerciseFile || input.answerKeyFile) {
+        void fetch("/api/exercise-ocr", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exerciseId: id }),
+        }).catch((err) => console.error("[exercise-ocr] trigger failed:", err));
+      }
       const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, homeworkUnitId);
       if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === homeworkUnitId ? fresh : u)));
       return id;
@@ -440,6 +459,39 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     await homeworkUnitsApi.deleteHomeworkUnit(supabase, unitId);
     setHomeworkUnits((prev) => prev.filter((u) => u.id !== unitId));
+  }, []);
+
+  const retryExerciseOcr = useCallback(async (homeworkUnitId: string, exerciseId: string): Promise<void> => {
+    const res = await fetch("/api/exercise-ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exerciseId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+    const supabase = getSupabaseBrowserClient();
+    const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, homeworkUnitId);
+    if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === homeworkUnitId ? fresh : u)));
+  }, []);
+
+  const retryMaterialOcr = useCallback(async (homeworkUnitId: string, materialId: string): Promise<void> => {
+    const res = await fetch("/api/material-ocr", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ materialId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || `คำขอล้มเหลว (${res.status})`);
+    const supabase = getSupabaseBrowserClient();
+    const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, homeworkUnitId);
+    if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === homeworkUnitId ? fresh : u)));
+  }, []);
+
+  /** Re-fetches one Homework Unit without triggering any OCR — used to poll for background OCR status changes. */
+  const refreshHomeworkUnit = useCallback(async (unitId: string): Promise<void> => {
+    const supabase = getSupabaseBrowserClient();
+    const fresh = await homeworkUnitsApi.getHomeworkUnit(supabase, unitId);
+    if (fresh) setHomeworkUnits((prev) => prev.map((u) => (u.id === unitId ? fresh : u)));
   }, []);
 
   const pendingReviewCount = useMemo(() => checks.filter((c) => c.status === "needs_review").length, [checks]);
@@ -479,6 +531,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       createExercise,
       deleteExercise,
       deleteHomeworkUnit,
+      retryExerciseOcr,
+      retryMaterialOcr,
+      refreshHomeworkUnit,
     }),
     [
       loading,
@@ -512,6 +567,9 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       createExercise,
       deleteExercise,
       deleteHomeworkUnit,
+      retryExerciseOcr,
+      retryMaterialOcr,
+      refreshHomeworkUnit,
     ]
   );
 

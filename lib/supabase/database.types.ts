@@ -20,6 +20,7 @@ export type SubmissionStatus =
 
 export type HomeworkFileGroup = "exercise" | "answer_key" | "material";
 export type FileKindEnum = "image" | "pdf" | "text" | "other";
+export type ReferenceOcrStatus = "pending" | "processing" | "completed" | "failed";
 
 export interface Database {
   public: {
@@ -141,6 +142,12 @@ export interface Database {
           file_name: string;
           storage_path: string | null;
           file_kind: FileKindEnum;
+          ocr_text: string | null;
+          ocr_status: ReferenceOcrStatus | null;
+          ocr_provider: string | null;
+          ocr_model: string | null;
+          ocr_error: string | null;
+          ocr_processed_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -151,6 +158,12 @@ export interface Database {
           file_name: string;
           storage_path?: string | null;
           file_kind?: FileKindEnum;
+          ocr_text?: string | null;
+          ocr_status?: ReferenceOcrStatus | null;
+          ocr_provider?: string | null;
+          ocr_model?: string | null;
+          ocr_error?: string | null;
+          ocr_processed_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["homework_unit_files"]["Insert"]>;
         Relationships: [
@@ -260,6 +273,12 @@ export interface Database {
           exercise_file_kind: FileKindEnum;
           scoring_criteria: string | null;
           max_score: number | null;
+          ocr_text: string | null;
+          ocr_status: ReferenceOcrStatus | null;
+          ocr_provider: string | null;
+          ocr_model: string | null;
+          ocr_error: string | null;
+          ocr_processed_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -274,6 +293,12 @@ export interface Database {
           exercise_file_kind?: FileKindEnum;
           scoring_criteria?: string | null;
           max_score?: number | null;
+          ocr_text?: string | null;
+          ocr_status?: ReferenceOcrStatus | null;
+          ocr_provider?: string | null;
+          ocr_model?: string | null;
+          ocr_error?: string | null;
+          ocr_processed_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["exercises"]["Insert"]>;
         Relationships: [
@@ -302,6 +327,12 @@ export interface Database {
           file_name: string | null;
           file_kind: FileKindEnum;
           answer_text: string | null;
+          ocr_text: string | null;
+          ocr_status: ReferenceOcrStatus | null;
+          ocr_provider: string | null;
+          ocr_model: string | null;
+          ocr_error: string | null;
+          ocr_processed_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -312,6 +343,12 @@ export interface Database {
           file_name?: string | null;
           file_kind?: FileKindEnum;
           answer_text?: string | null;
+          ocr_text?: string | null;
+          ocr_status?: ReferenceOcrStatus | null;
+          ocr_provider?: string | null;
+          ocr_model?: string | null;
+          ocr_error?: string | null;
+          ocr_processed_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["answer_keys"]["Insert"]>;
         Relationships: [
@@ -529,6 +566,7 @@ export interface Database {
       submission_status: SubmissionStatus;
       homework_file_group: HomeworkFileGroup;
       file_kind: FileKindEnum;
+      reference_ocr_status: ReferenceOcrStatus;
     };
     CompositeTypes: Record<string, never>;
   };

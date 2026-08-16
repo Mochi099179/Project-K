@@ -1,6 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, ReferenceOcrStatus } from "@/lib/supabase/database.types";
 import type { Exercise, FileKind, FileRef, HomeworkUnit } from "@/lib/types";
+
+export type ReferenceOcrPatch =
+  | { status: "processing" }
+  | { status: "completed"; text: string; provider: string; model: string }
+  | { status: "failed"; error: string };
 
 type Client = SupabaseClient<Database>;
 type UnitRow = Database["public"]["Tables"]["homework_units"]["Row"];
@@ -14,7 +19,14 @@ export type HomeworkFileGroup = "material";
 const HOMEWORK_UNIT_SELECT = "*, homework_unit_files(*), exercises(*, answer_keys(*))";
 
 function mapFileRef(row: FileRow): FileRef {
-  return { id: row.id, name: row.file_name, kind: row.file_kind as FileKind, addedAt: row.created_at };
+  return {
+    id: row.id,
+    name: row.file_name,
+    kind: row.file_kind as FileKind,
+    addedAt: row.created_at,
+    ocrStatus: row.ocr_status,
+    ocrError: row.ocr_error,
+  };
 }
 
 function mapExercise(row: ExerciseRow, answerKey: AnswerKeyRow | undefined): Exercise {
@@ -26,6 +38,8 @@ function mapExercise(row: ExerciseRow, answerKey: AnswerKeyRow | undefined): Exe
     exerciseFilePath: row.exercise_file_path,
     exerciseFileName: row.exercise_file_name,
     exerciseFileKind: row.exercise_file_kind as FileKind,
+    exerciseFileOcrStatus: row.ocr_status,
+    exerciseFileOcrError: row.ocr_error,
     scoringCriteria: row.scoring_criteria,
     maxScore: row.max_score,
     answerKey: answerKey
@@ -35,6 +49,8 @@ function mapExercise(row: ExerciseRow, answerKey: AnswerKeyRow | undefined): Exe
           fileName: answerKey.file_name,
           fileKind: answerKey.file_kind as FileKind,
           answerText: answerKey.answer_text,
+          ocrStatus: answerKey.ocr_status,
+          ocrError: answerKey.ocr_error,
         }
       : null,
     createdAt: row.created_at,
@@ -99,7 +115,7 @@ export async function createHomeworkUnit(
   return data.id;
 }
 
-/** Uploads a Teaching Material file to Storage (owner-scoped path) and records it against the unit. */
+/** Uploads a Teaching Material file to Storage (owner-scoped path), records it against the unit, and returns the new row's id — the caller fires off OCR for it (see app/api/material-ocr/route.ts). */
 export async function addFileToHomeworkUnit(
   supabase: Client,
   ownerId: string,
@@ -107,21 +123,27 @@ export async function addFileToHomeworkUnit(
   group: HomeworkFileGroup,
   file: File,
   kind: FileKind
-): Promise<void> {
+): Promise<string> {
   const path = `${ownerId}/${unitId}/${Date.now()}-${file.name}`;
 
   const { error: uploadError } = await supabase.storage.from("teaching-materials").upload(path, file);
   if (uploadError) throw uploadError;
 
-  const { error: insertError } = await supabase.from("homework_unit_files").insert({
-    homework_unit_id: unitId,
-    owner_id: ownerId,
-    group_type: group,
-    file_name: file.name,
-    storage_path: path,
-    file_kind: kind,
-  });
+  const { data, error: insertError } = await supabase
+    .from("homework_unit_files")
+    .insert({
+      homework_unit_id: unitId,
+      owner_id: ownerId,
+      group_type: group,
+      file_name: file.name,
+      storage_path: path,
+      file_kind: kind,
+      ocr_status: "pending",
+    })
+    .select("id")
+    .single();
   if (insertError) throw insertError;
+  return data.id;
 }
 
 // ----------------------------------------------------------------------------
@@ -162,6 +184,7 @@ export async function createExercise(
     exercise_file_path: exerciseFilePath,
     exercise_file_name: input.exerciseFile?.file.name ?? null,
     exercise_file_kind: input.exerciseFile?.kind ?? "other",
+    ocr_status: input.exerciseFile ? "pending" : null,
     scoring_criteria: input.scoringCriteria || null,
     max_score: input.maxScore ?? null,
   });
@@ -182,6 +205,7 @@ export async function createExercise(
       file_path: answerKeyFilePath,
       file_name: input.answerKeyFile?.file.name ?? null,
       file_kind: input.answerKeyFile?.kind ?? "other",
+      ocr_status: input.answerKeyFile ? "pending" : null,
       answer_text: input.answerKeyText?.trim() || null,
     });
     if (answerKeyError) throw answerKeyError;
@@ -190,24 +214,88 @@ export async function createExercise(
   return exerciseId;
 }
 
-/** Server-side: the full checking context for one Exercise (reference file + scoring criteria + answer key). */
-export async function getExerciseWithAnswerKey(supabase: Client, exerciseId: string): Promise<Exercise | null> {
+/**
+ * Server-side only: an Exercise plus its and its answer-key's cached OCR
+ * text/status — kept as a superset of the client-facing `Exercise` type
+ * rather than added to it, since cached OCR text must never reach the
+ * client (see lib/pipeline/check-context.ts, the only caller of this
+ * function).
+ */
+export type ExerciseWithOcrCache = Exercise & {
+  exerciseOcrText: string | null;
+  exerciseOcrStatus: ReferenceOcrStatus | null;
+  answerKeyOcrText: string | null;
+  answerKeyOcrStatus: ReferenceOcrStatus | null;
+};
+
+/** Server-side: the full checking context for one Exercise (reference file + scoring criteria + answer key + cached OCR text). */
+export async function getExerciseWithAnswerKey(supabase: Client, exerciseId: string): Promise<ExerciseWithOcrCache | null> {
   const { data, error } = await supabase.from("exercises").select("*, answer_keys(*)").eq("id", exerciseId).maybeSingle();
   if (error) throw error;
   if (!data) return null;
   const { answer_keys, ...row } = data as ExerciseRow & { answer_keys: AnswerKeyRow | null };
-  return mapExercise(row, answer_keys ?? undefined);
+  return {
+    ...mapExercise(row, answer_keys ?? undefined),
+    exerciseOcrText: row.ocr_text,
+    exerciseOcrStatus: row.ocr_status,
+    answerKeyOcrText: answer_keys?.ocr_text ?? null,
+    answerKeyOcrStatus: answer_keys?.ocr_status ?? null,
+  };
 }
 
-/** Server-side: a Homework Unit's Teaching Materials, for AI context when checking against one of its Exercises. */
-export async function listMaterialsForUnit(supabase: Client, homeworkUnitId: string): Promise<FileRef[]> {
+/** Server-side only: a Teaching Material plus its cached OCR text — see ExerciseWithOcrCache for why this isn't folded into the client-facing `FileRef` type. */
+export type MaterialWithOcrCache = FileRef & { ocrText: string | null; ocrStatus: ReferenceOcrStatus | null };
+
+/** Server-side: a Homework Unit's Teaching Materials (with cached OCR text), for AI context when checking against one of its Exercises. */
+export async function listMaterialsForUnit(supabase: Client, homeworkUnitId: string): Promise<MaterialWithOcrCache[]> {
   const { data, error } = await supabase
     .from("homework_unit_files")
     .select("*")
     .eq("homework_unit_id", homeworkUnitId)
     .eq("group_type", "material");
   if (error) throw error;
-  return (data ?? []).map(mapFileRef);
+  return (data ?? []).map((row) => ({ ...mapFileRef(row), ocrText: row.ocr_text, ocrStatus: row.ocr_status }));
+}
+
+// ----------------------------------------------------------------------------
+// Reference-material OCR writes — see lib/pipeline/reference-ocr.ts. A retry
+// simply overwrites the same row's ocr_* columns in place (unlike
+// submissions' ocr_results, these aren't kept as history — see migration
+// 0009's own comment for why). A failed attempt never clears a previously
+// cached ocr_text, so a flaky retry can't regress a working cache back to
+// "nothing cached".
+// ----------------------------------------------------------------------------
+
+function referenceOcrUpdatePayload(patch: ReferenceOcrPatch) {
+  if (patch.status === "processing") {
+    return { ocr_status: "processing" as const };
+  }
+  if (patch.status === "completed") {
+    return {
+      ocr_status: "completed" as const,
+      ocr_text: patch.text,
+      ocr_provider: patch.provider,
+      ocr_model: patch.model,
+      ocr_error: null,
+      ocr_processed_at: new Date().toISOString(),
+    };
+  }
+  return { ocr_status: "failed" as const, ocr_error: patch.error, ocr_processed_at: new Date().toISOString() };
+}
+
+export async function updateExerciseOcrResult(supabase: Client, exerciseId: string, patch: ReferenceOcrPatch): Promise<void> {
+  const { error } = await supabase.from("exercises").update(referenceOcrUpdatePayload(patch)).eq("id", exerciseId);
+  if (error) throw error;
+}
+
+export async function updateAnswerKeyOcrResult(supabase: Client, answerKeyId: string, patch: ReferenceOcrPatch): Promise<void> {
+  const { error } = await supabase.from("answer_keys").update(referenceOcrUpdatePayload(patch)).eq("id", answerKeyId);
+  if (error) throw error;
+}
+
+export async function updateMaterialOcrResult(supabase: Client, materialId: string, patch: ReferenceOcrPatch): Promise<void> {
+  const { error } = await supabase.from("homework_unit_files").update(referenceOcrUpdatePayload(patch)).eq("id", materialId);
+  if (error) throw error;
 }
 
 export async function deleteExercise(supabase: Client, exerciseId: string): Promise<void> {

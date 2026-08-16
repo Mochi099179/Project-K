@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, ReferenceOcrStatus } from "@/lib/supabase/database.types";
+import type { FileKind } from "@/lib/types";
 import { asFileRef, asFileRefList, type StoredFileRef } from "@/lib/data/mappers";
 import { getExerciseWithAnswerKey, listMaterialsForUnit } from "@/lib/data/homework-units";
 import {
@@ -17,16 +18,47 @@ type SubmissionRow = Database["public"]["Tables"]["submissions"]["Row"];
 export type CheckingContext = {
   /** Provider-neutral — handed to the OCR stage, which must not depend on any one AI vendor's format. */
   studentWorkFiles: UploadedFile[];
-  /** Claude-vision blocks — used only by Answer Analysis (still Claude-based), never by OCR. */
+  /** Either a cached-OCR text block or a raw vision block (image/PDF) — used only by Answer Analysis, never by OCR. */
   referenceExerciseBlock: ContentBlock | null;
   answerKeyBlock: ContentBlock | null;
   answerKeyText: string | null;
   scoringCriteria: string | null;
-  /** Non-grading context shared by both AI stages: student id, topic, teaching-materials note. */
+  /**
+   * Cached OCR text from completed-OCR Teaching Materials, joined into one
+   * passage — used only by Answer Analysis. Deliberately NOT part of
+   * contextLines: materials now carry real grading content (see migration
+   * 0009), and lib/ai/ocr.ts's own contract says the OCR stage must never
+   * receive exercise/grading content, only the filename-level note that
+   * contextLines still carries for materials without completed OCR.
+   */
+  materialsText: string | null;
+  /** Non-grading context shared by both AI stages: student id, topic, teaching-materials note (filenames only — never OCR'd content). */
   contextLines: string[];
 };
 
 export type CheckingContextResult = { ok: true; context: CheckingContext } | { ok: false; error: string };
+
+/**
+ * Uses cached OCR text (as a text block) when available, instead of
+ * re-downloading and re-compressing the raw file — this is the lazy
+ * fallback: a null/pending/processing/failed cache transparently falls
+ * back to today's resolveFileBlock download path, per file, no flag needed.
+ */
+async function resolveReferenceBlock(
+  supabase: Client,
+  bucket: string,
+  path: string | null,
+  name: string | null,
+  kind: FileKind | undefined,
+  label: string,
+  cachedStatus: ReferenceOcrStatus | null,
+  cachedText: string | null
+): Promise<{ block: ContentBlock | null; unreadableLabel: string | null }> {
+  if (cachedStatus === "completed" && cachedText?.trim()) {
+    return { block: { type: "text", text: `[${label} — ข้อความที่ถอดได้]\n${cachedText.trim()}` }, unreadableLabel: null };
+  }
+  return resolveFileBlock(supabase, bucket, path, name, kind, label);
+}
 
 // Conservative combined budget for the student's work images in one AI
 // request (base64 adds ~33% on top of this, plus room for a reference
@@ -93,6 +125,7 @@ export async function buildCheckingContext(supabase: Client, submission: Submiss
   let answerKeyText = submission.answer_key_text?.trim() || null;
   let scoringCriteria: string | null = null;
   let teachingMaterialsLine: string | null = null;
+  let materialsText: string | null = null;
 
   if (submission.exercise_id) {
     const exercise = await getExerciseWithAnswerKey(supabase, submission.exercise_id);
@@ -100,14 +133,25 @@ export async function buildCheckingContext(supabase: Client, submission: Submiss
       scoringCriteria = exercise.scoringCriteria;
 
       const [exerciseFile, answerKeyFile] = await Promise.all([
-        resolveFileBlock(supabase, "exercises", exercise.exerciseFilePath, exercise.exerciseFileName, exercise.exerciseFileKind, "แบบฝึกหัดต้นฉบับ"),
-        resolveFileBlock(
+        resolveReferenceBlock(
+          supabase,
+          "exercises",
+          exercise.exerciseFilePath,
+          exercise.exerciseFileName,
+          exercise.exerciseFileKind,
+          "แบบฝึกหัดต้นฉบับ",
+          exercise.exerciseOcrStatus,
+          exercise.exerciseOcrText
+        ),
+        resolveReferenceBlock(
           supabase,
           "answer-keys",
           exercise.answerKey?.filePath ?? null,
           exercise.answerKey?.fileName ?? null,
           exercise.answerKey?.fileKind,
-          "ไฟล์เฉลย"
+          "ไฟล์เฉลย",
+          exercise.answerKeyOcrStatus,
+          exercise.answerKeyOcrText
         ),
       ]);
       referenceExerciseBlock = exerciseFile.block;
@@ -121,10 +165,16 @@ export async function buildCheckingContext(supabase: Client, submission: Submiss
     }
     if (submission.homework_unit_id) {
       const materials = await listMaterialsForUnit(supabase, submission.homework_unit_id);
-      if (materials.length) {
+      const ocredMaterials = materials.filter((m) => m.ocrStatus === "completed" && m.ocrText?.trim());
+      const uncachedMaterials = materials.filter((m) => !(m.ocrStatus === "completed" && m.ocrText?.trim()));
+
+      if (ocredMaterials.length) {
+        materialsText = ocredMaterials.map((m) => `[สื่อการสอน: ${m.name}]\n${m.ocrText!.trim()}`).join("\n\n");
+      }
+      if (uncachedMaterials.length) {
         teachingMaterialsLine = [
           teachingMaterialsLine,
-          `มีสื่อการสอนที่เกี่ยวข้องกับชุดแบบฝึกหัดนี้ ${materials.length} ไฟล์: ${materials.map((m) => m.name).join(", ")}`,
+          `มีสื่อการสอนที่เกี่ยวข้องกับชุดแบบฝึกหัดนี้ ${uncachedMaterials.length} ไฟล์: ${uncachedMaterials.map((m) => m.name).join(", ")}`,
         ]
           .filter(Boolean)
           .join("\n");
@@ -171,6 +221,6 @@ export async function buildCheckingContext(supabase: Client, submission: Submiss
 
   return {
     ok: true,
-    context: { studentWorkFiles, referenceExerciseBlock, answerKeyBlock, answerKeyText, scoringCriteria, contextLines },
+    context: { studentWorkFiles, referenceExerciseBlock, answerKeyBlock, answerKeyText, scoringCriteria, materialsText, contextLines },
   };
 }

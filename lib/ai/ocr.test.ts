@@ -1,8 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { recognizeHandwriting, type HandwritingRecognitionInput } from "./handwriting";
+import { recognizeHandwriting, ocrConfidenceFallbackThreshold, type HandwritingRecognitionInput } from "./ocr";
 import type { UploadedFile } from "./content-blocks";
 
-const ENV_KEYS = ["HANDWRITING_AI_PROVIDER", "AKSON_OCR_API_KEY", "AKSON_OCR_BASE_URL", "AKSON_OCR_MODEL"] as const;
+const ENV_KEYS = [
+  "HANDWRITING_AI_PROVIDER",
+  "AKSON_OCR_API_KEY",
+  "AKSON_OCR_BASE_URL",
+  "AKSON_OCR_MODEL",
+  "ANTHROPIC_API_KEY",
+  "HANDWRITING_AI_API_KEY",
+  "OCR_CONFIDENCE_FALLBACK_THRESHOLD",
+] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 function setAksonEnv(overrides: Partial<Record<(typeof ENV_KEYS)[number], string>> = {}) {
@@ -57,21 +65,6 @@ describe("recognizeHandwriting — provider routing", () => {
     expect((init?.headers as Record<string, string>)["X-API-Key"]).toBe("test-api-key");
   });
 
-  it("tries AksonOCR first when provider is unset (no explicit override)", async () => {
-    delete process.env.HANDWRITING_AI_PROVIDER;
-    process.env.AKSON_OCR_API_KEY = "test-api-key";
-    process.env.AKSON_OCR_BASE_URL = "https://akson.test";
-    vi.mocked(fetch).mockResolvedValueOnce(
-      jsonResponse(200, { model: "AksonOCR-handwriting", pages: [{ index: 0, markdown: "สวัสดี", confidence: 87 }] })
-    );
-
-    const result = await recognizeHandwriting(oneImageInput);
-
-    expect(result.provider).toBe("akson");
-    const [url] = vi.mocked(fetch).mock.calls[0];
-    expect(url).toBe("https://akson.test/api/v2/ocr");
-  });
-
   it("never touches the AksonOCR endpoint when explicitly forced to anthropic", async () => {
     process.env.HANDWRITING_AI_PROVIDER = "anthropic";
     delete process.env.ANTHROPIC_API_KEY;
@@ -89,55 +82,73 @@ describe("recognizeHandwriting — provider routing", () => {
   });
 });
 
-describe("recognizeHandwriting — automatic Akson→Anthropic fallback (unset provider)", () => {
+describe("recognizeHandwriting — automatic Anthropic→AksonOCR fallback (unset provider)", () => {
+  // Claude Vision is the default first attempt (cheaper at this app's
+  // volume than AksonOCR, which bills per page — see lib/ai/ocr.ts's header
+  // comment). Forcing the Anthropic client to throw at construction time —
+  // by leaving both API-key env vars unset — is the same reliable,
+  // no-real-network technique the rest of this suite already uses to
+  // simulate "Anthropic's attempt failed" without needing to mock the SDK's
+  // streaming wire format.
   beforeEach(() => {
     delete process.env.HANDWRITING_AI_PROVIDER;
-  });
-
-  it("falls back to Anthropic when AksonOCR is unconfigured", async () => {
-    delete process.env.AKSON_OCR_API_KEY;
-    delete process.env.AKSON_OCR_BASE_URL;
-
-    // Akson never gets far enough to call fetch (config error is thrown
-    // before any request); the Anthropic path's own fetch usage then fails
-    // too (bare mock, no real API) — proving the fallback was actually
-    // attempted rather than the original Akson error just propagating.
-    await expect(recognizeHandwriting(oneImageInput)).rejects.not.toThrow(/AKSON_OCR_API_KEY is not configured/);
-  });
-
-  it("falls back to Anthropic when AksonOCR's request fails (e.g. HTTP 500)", async () => {
-    process.env.AKSON_OCR_API_KEY = "test-api-key";
-    process.env.AKSON_OCR_BASE_URL = "https://akson.test";
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.HANDWRITING_AI_API_KEY;
-    vi.useFakeTimers();
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(500, { success: false, error: { code: "PROCESSING_ERROR", message: "boom" } }));
-
-    const promise = recognizeHandwriting(oneImageInput);
-    // With no Anthropic key configured, its SDK throws at client
-    // construction — before ever calling fetch — so the fallback having
-    // happened is proven by the FINAL error no longer being an Akson-shaped
-    // one (Akson's own error text always contains "AksonOCR"), not by a 4th
-    // fetch call.
-    const assertion = expect(promise).rejects.not.toThrow(/AksonOCR/);
-    await vi.runAllTimersAsync();
-    await assertion;
-
-    const calledUrls = vi.mocked(fetch).mock.calls.map(([url]) => url);
-    expect(calledUrls.filter((u) => u === "https://akson.test/api/v2/ocr")).toHaveLength(3); // Akson's own retry policy, then gave up
   });
 
-  it("does not fall back to Anthropic when AksonOCR succeeds", async () => {
+  it("falls back to AksonOCR when Anthropic is unconfigured (no API key)", async () => {
     process.env.AKSON_OCR_API_KEY = "test-api-key";
     process.env.AKSON_OCR_BASE_URL = "https://akson.test";
     vi.mocked(fetch).mockResolvedValueOnce(
-      jsonResponse(200, { model: "AksonOCR-handwriting", pages: [{ index: 0, markdown: "ok", confidence: 90 }] })
+      jsonResponse(200, { model: "AksonOCR-handwriting", pages: [{ index: 0, markdown: "สวัสดี", confidence: 87 }] })
     );
 
     const result = await recognizeHandwriting(oneImageInput);
 
     expect(result.provider).toBe("akson");
-    expect(fetch).toHaveBeenCalledTimes(1); // no fallback call made
+    const [url] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe("https://akson.test/api/v2/ocr");
+  });
+
+  it("surfaces AksonOCR's own error when both providers fail", async () => {
+    // Anthropic fails first (no key, per beforeEach); AksonOCR is also left
+    // unconfigured here, so its config-validation error is what should
+    // ultimately propagate — proving the fallback actually reached
+    // AksonOCR's code path rather than the original Anthropic error just
+    // propagating unchanged.
+    delete process.env.AKSON_OCR_API_KEY;
+    delete process.env.AKSON_OCR_BASE_URL;
+
+    await expect(recognizeHandwriting(oneImageInput)).rejects.toThrow(/AKSON_OCR_API_KEY is not configured/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// Note: the confidence-gated re-extraction itself (Anthropic succeeds, each
+// page's own confidence is compared against ocrConfidenceFallbackThreshold(),
+// and low-confidence pages are individually re-extracted with AksonOCR)
+// isn't covered here — exercising it needs a real Anthropic streaming (SSE)
+// response, which nothing in this codebase currently mocks (answer-analysis.ts's
+// pure-Anthropic Stage 2 has no test coverage for the same reason). The
+// threshold's own parsing logic is covered below instead.
+describe("ocrConfidenceFallbackThreshold", () => {
+  afterEach(() => {
+    delete process.env.OCR_CONFIDENCE_FALLBACK_THRESHOLD;
+  });
+
+  it("defaults to 0.8 when unset", () => {
+    delete process.env.OCR_CONFIDENCE_FALLBACK_THRESHOLD;
+    expect(ocrConfidenceFallbackThreshold()).toBe(0.8);
+  });
+
+  it("uses the configured value when it's a valid number in [0, 1]", () => {
+    process.env.OCR_CONFIDENCE_FALLBACK_THRESHOLD = "0.65";
+    expect(ocrConfidenceFallbackThreshold()).toBe(0.65);
+  });
+
+  it.each(["not-a-number", "-0.1", "1.5", ""])("falls back to the default for an invalid value (%j)", (raw) => {
+    process.env.OCR_CONFIDENCE_FALLBACK_THRESHOLD = raw;
+    expect(ocrConfidenceFallbackThreshold()).toBe(0.8);
   });
 });
 

@@ -106,11 +106,16 @@ export type NotificationItem = {
 
 export type FileKind = "image" | "pdf" | "text" | "other";
 
+/** Status of a reference file's cached OCR text (see migration 0009) — null means no file was ever attached, distinct from "pending". */
+export type ReferenceFileOcrStatus = "pending" | "processing" | "completed" | "failed";
+
 export type FileRef = {
   id: string;
   name: string;
   kind: FileKind;
   addedAt: string;
+  ocrStatus: ReferenceFileOcrStatus | null;
+  ocrError: string | null;
 };
 
 /** A single question/answer evaluation. AI-produced (by Answer Analysis), and optionally teacher-corrected. */
@@ -208,6 +213,8 @@ export type ExerciseAnswerKey = {
   fileName: string | null;
   fileKind: FileKind;
   answerText: string | null;
+  ocrStatus: ReferenceFileOcrStatus | null;
+  ocrError: string | null;
 };
 
 export type Exercise = {
@@ -218,6 +225,8 @@ export type Exercise = {
   exerciseFilePath: string | null;
   exerciseFileName: string | null;
   exerciseFileKind: FileKind;
+  exerciseFileOcrStatus: ReferenceFileOcrStatus | null;
+  exerciseFileOcrError: string | null;
   scoringCriteria: string | null;
   maxScore: number | null;
   answerKey: ExerciseAnswerKey | null;

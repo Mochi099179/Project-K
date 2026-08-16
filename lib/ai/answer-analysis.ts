@@ -26,6 +26,8 @@ export type AnswerAnalysisInput = {
   answerKeyBlock?: ContentBlock | null;
   answerKeyText?: string | null;
   scoringCriteria?: string | null;
+  /** Cached OCR text from the Homework Unit's Teaching Materials (joined), if any have completed OCR. */
+  materialsText?: string | null;
   contextLines: string[]; // student id, topic, teaching materials note, etc.
 };
 
@@ -87,6 +89,7 @@ async function analyzeWithAnthropic(input: AnswerAnalysisInput): Promise<AnswerA
     input.scoringCriteria?.trim()
       ? `เกณฑ์การให้คะแนน (Scoring Criteria) — ใช้เกณฑ์นี้ในการให้คะแนนแต่ละข้ออย่างเคร่งครัด:\n${input.scoringCriteria.trim()}`
       : null,
+    input.materialsText?.trim() ? `เนื้อหาสื่อการสอนที่เกี่ยวข้อง (ใช้ประกอบความเข้าใจบริบท):\n${input.materialsText.trim()}` : null,
   ]
     .filter(Boolean)
     .join("\n\n");
